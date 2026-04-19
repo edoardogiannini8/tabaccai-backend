@@ -14,37 +14,39 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 const catalogoStringa = catalogo.map(p =>
-  `${p.brand} (${p.variante}) - AAMS: ${p.codice_aams} - €${p.prezzo_pacchetto}/pacco - alias: ${p.alias.join(', ')}`
+  `${p.brand} (${p.variante}) - AAMS: ${p.codice_aams} - €${p.prezzo_pacchetto}/pacco`
 ).join('\n');
 
 const SYSTEM_VOICE = `Sei l'assistente AI di TabaccAI per tabaccai italiani.
 Ricevi testo grezzo trascritto dal microfono in italiano con possibili errori di pronuncia e ortografia.
 
 ATTENZIONE AI MISSPELLING COMUNI:
-- "malboro" / "marbolo" / "marlo" = Marlboro
-- "chestefild" / "cesterfield" / "chesterfil" = Chesterfield  
-- "camel activ" / "camel ative" = Camel Activate
-- "filippo morris" / "filip morris" = Philip Morris
-- "vinston" / "wiston" / "uinston" = Winston
-- "emesse" / "nazionali" = MS
-- "iqos" / "icos" = HEETS o TEREA
-- "hites" / "hits" / "eets" = HEETS
+- "malboro/marbolo/marlo" = MARLBORO
+- "chestefild/cesterfield/chesterfil" = CHESTERFIELD
+- "camel activ/ative" = CAMEL ACTIVATE
+- "filippo morris/filip morris" = PHILIP MORRIS
+- "vinston/wiston/uinston" = WINSTON
+- "emesse/nazionali" = MS o DUNHILL MS
+- "iqos/icos" = TEREA o HEETS
+- "hites/hits/eets" = HEETS
 - "teria" = TEREA
-- "golden virginia" (qualsiasi pronuncia) = Golden Virginia
-- "gaulois" / "galois" = Gauloises
-- Sinonimi: "morbide" / "cartoccio" = variante Soft; "lunghe" / "100" = variante 100s
+- "gaulois/galois" = GAULOISES
+- "morbide/cartoccio/soft" = variante Soft (CART20)
+- "lunghe/100/cento" = variante 100s
+- "glo/neo" = NEO STICKS
 
-Catalogo prodotti disponibile (${catalogo.length} prodotti, prezzi al 15 aprile 2026):
+Catalogo prodotti disponibile (${catalogo.length} prodotti, listino Logista 19 aprile 2026):
 ${catalogoStringa}
 
 Regole:
-1. Identifica i prodotti dal catalogo anche con errori di pronuncia gravi
+1. Identifica prodotti anche con errori gravi di pronuncia
 2. Le quantita sono in STECCHE — "tre" = 3 stecche
-3. Se l'utente dice "morbide" cerca la variante Soft dello stesso brand
-4. Rispondi SOLO con JSON array puro, zero testo aggiuntivo, inizia con [
+3. "morbide/soft/cartoccio" = cerca variante Soft dello stesso brand
+4. Rispondi SOLO con JSON array puro — inizia con [ finisce con ]
+5. Zero testo aggiuntivo, zero markdown, zero backtick
 
 Formato: [{"brand":"nome esatto","variante":"variante","qty":numero,"codice_aams":"codice","testo_originale":"detto","corretto":true/false}]
-Se non trovato nonostante i tentativi: "codice_aams":"NON_TROVATO"`;
+Se non trovato: "codice_aams":"NON_TROVATO"`;
 
 function calcolaPrezzoProdotto(prodotto, qtaStecche) {
   const p = catalogo.find(c => c.codice_aams === prodotto.codice_aams);
@@ -62,11 +64,13 @@ function calcolaPrezzoProdotto(prodotto, qtaStecche) {
     peso_stecca_g: p.peso_stecca_g,
     peso_totale_g: pesoTotaleG,
     peso_totale_kg: parseFloat((pesoTotaleG / 1000).toFixed(3)),
+    unita_minima_kgc: p.unita_minima_kgc,
+    quantita_kgc: parseFloat((p.unita_minima_kgc * qtaStecche).toFixed(3)),
   };
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', messaggio: 'TabaccAI backend v4', prodotti: catalogo.length });
+  res.json({ status: 'ok', messaggio: 'TabaccAI backend v5', prodotti: catalogo.length });
 });
 
 app.post('/api/voice', async (req, res) => {
@@ -153,7 +157,7 @@ app.post('/api/note', async (req, res) => {
   try {
     const risposta = await anthropic.messages.create({
       model: 'claude-sonnet-4-5', max_tokens: 512,
-      system: `Analizza questa nota di un tabaccaio. Oggi: ${new Date().toISOString().split('T')[0]}\nCatalogo (parziale): ${catalogoStringa.split('\n').slice(0,20).join('\n')}\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledì 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}`,
+      system: `Analizza questa nota di un tabaccaio. Oggi: ${new Date().toISOString().split('T')[0]}\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledì 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}`,
       messages: [{ role:'user', content: testo }],
     });
     let t = risposta.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
@@ -201,22 +205,54 @@ app.get('/api/ordini/:session_id/ultimo', async (req, res) => {
 app.post('/api/excel', (req, res) => {
   const { prodotti: lista, data_ordine } = req.body;
   if (!lista || lista.length === 0) return res.status(400).json({ errore: 'Nessun prodotto' });
+
   const validi = lista.filter(p => p.codice_aams !== 'NON_TROVATO');
   let totale_tabaccaio = 0, totale_peso_kg = 0;
-  const righe = validi.map(p => {
+
+  // Foglio 1: riepilogo completo per il tabaccaio
+  const righeOrdine = validi.map(p => {
     const prezzi = calcolaPrezzoProdotto(p, p.qty);
     if (prezzi) { totale_tabaccaio += prezzi.totale_tabaccaio; totale_peso_kg += prezzi.peso_totale_kg; }
-    return { 'Codice AAMS': p.codice_aams, 'Descrizione': `${p.brand} ${p.variante||''}`.trim(), 'Stecche': p.qty, 'Prezzo Stecca (EUR)': prezzi ? prezzi.prezzo_stecca_tabaccaio : '', 'Totale (EUR)': prezzi ? prezzi.totale_tabaccaio : '', 'Peso Stecca (g)': prezzi ? prezzi.peso_stecca_g : '', 'Peso Totale (kg)': prezzi ? prezzi.peso_totale_kg : '' };
+    return {
+      'Codice AAMS': p.codice_aams,
+      'Descrizione': p.brand + (p.variante ? ` (${p.variante})` : ''),
+      'Stecche': p.qty,
+      'Kgc': prezzi ? prezzi.quantita_kgc : '',
+      'Prezzo Stecca (EUR)': prezzi ? prezzi.prezzo_stecca_tabaccaio : '',
+      'Totale (EUR)': prezzi ? prezzi.totale_tabaccaio : '',
+      'Peso Stecca (g)': prezzi ? prezzi.peso_stecca_g : '',
+      'Peso Totale (kg)': prezzi ? prezzi.peso_totale_kg : '',
+    };
   });
-  righe.push({ 'Codice AAMS':'', 'Descrizione':'TOTALE ORDINE', 'Stecche': validi.reduce((s,p)=>s+(p.qty||0),0), 'Prezzo Stecca (EUR)':'', 'Totale (EUR)': parseFloat(totale_tabaccaio.toFixed(2)), 'Peso Stecca (g)':'', 'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)) });
+  righeOrdine.push({
+    'Codice AAMS': '', 'Descrizione': 'TOTALE ORDINE',
+    'Stecche': validi.reduce((s,p)=>s+(p.qty||0),0),
+    'Kgc': parseFloat(totale_peso_kg.toFixed(3)),
+    'Prezzo Stecca (EUR)': '',
+    'Totale (EUR)': parseFloat(totale_tabaccaio.toFixed(2)),
+    'Peso Stecca (g)': '',
+    'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)),
+  });
+
+  // Foglio 2: formato esatto Logista — Codice AAMS + Quantita in Kgc
+  const righeLogista = validi.map(p => {
+    const prod = catalogo.find(c => c.codice_aams === p.codice_aams);
+    const kgc = prod ? parseFloat((prod.unita_minima_kgc * p.qty).toFixed(3)) : p.qty * 0.2;
+    return {
+      'Codice AAMS': p.codice_aams,
+      'Quantita': kgc,
+    };
+  });
+
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(righe);
-  ws['!cols'] = [{wch:14},{wch:30},{wch:9},{wch:18},{wch:14},{wch:16},{wch:16}];
-  XLSX.utils.book_append_sheet(wb, ws, 'Ordine');
-  const righeLogista = validi.map(p => ({ 'Codice AAMS': p.codice_aams, 'Quantita': p.qty }));
-  const wsL = XLSX.utils.json_to_sheet(righeLogista);
-  wsL['!cols'] = [{wch:15},{wch:10}];
-  XLSX.utils.book_append_sheet(wb, wsL, 'Upload Logista');
+  const ws1 = XLSX.utils.json_to_sheet(righeOrdine);
+  ws1['!cols'] = [{wch:14},{wch:32},{wch:9},{wch:8},{wch:18},{wch:14},{wch:16},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Ordine');
+
+  const ws2 = XLSX.utils.json_to_sheet(righeLogista);
+  ws2['!cols'] = [{wch:15},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Upload Logista');
+
   const buffer = XLSX.write(wb, { type:'buffer', bookType:'xlsx' });
   const nome = `ordine_tabaccai_${data_ordine||new Date().toISOString().split('T')[0]}.xlsx`;
   res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
@@ -225,4 +261,4 @@ app.post('/api/excel', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`TabaccAI v4 — ${catalogo.length} prodotti in catalogo — porta ${PORT}`));
+app.listen(PORT, () => console.log(`TabaccAI v5 — ${catalogo.length} prodotti — porta ${PORT}`));
