@@ -4,6 +4,7 @@ const cors = require('cors');
 const Anthropic = require('@anthropic-ai/sdk');
 const XLSX = require('xlsx');
 const { createClient } = require('@supabase/supabase-js');
+const { Resend } = require('resend');
 const { catalogo } = require('./catalogo');
 
 const app = express();
@@ -12,6 +13,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const catalogoStringa = catalogo.map(p =>
   `${p.brand} (${p.variante}) - AAMS: ${p.codice_aams} - €${p.prezzo_pacchetto}/pacco`
@@ -26,7 +28,7 @@ ATTENZIONE AI MISSPELLING COMUNI:
 - "camel activ/ative" = CAMEL ACTIVATE
 - "filippo morris/filip morris" = PHILIP MORRIS
 - "vinston/wiston/uinston" = WINSTON
-- "emesse/nazionali" = MS o DUNHILL MS
+- "emesse/nazionali" = DUNHILL MS
 - "iqos/icos" = TEREA o HEETS
 - "hites/hits/eets" = HEETS
 - "teria" = TEREA
@@ -70,7 +72,7 @@ function calcolaPrezzoProdotto(prodotto, qtaStecche) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', messaggio: 'TabaccAI backend v5', prodotti: catalogo.length });
+  res.json({ status: 'ok', messaggio: 'TabaccAI backend v6', prodotti: catalogo.length });
 });
 
 app.post('/api/voice', async (req, res) => {
@@ -109,7 +111,7 @@ app.post('/api/modifica-ordine', async (req, res) => {
     const ordineStr = ordine_corrente.map(p => `${p.brand} (${p.variante}) x${p.qty} stecche`).join('\n');
     const risposta = await anthropic.messages.create({
       model: 'claude-sonnet-4-5', max_tokens: 1024,
-      system: `Sei l'assistente AI di TabaccAI. Ordine attuale:\n${ordineStr}\n\nCatalogo:\n${catalogoStringa}\n\nATTENZIONE AI MISSPELLING — stessa logica del riconoscimento vocale.\nRispondi SOLO con JSON puro:\n{"aggiunti":[{"brand":"...","variante":"...","qty":N,"codice_aams":"..."}],"rimossi":[{"brand":"...","codice_aams":"..."}],"modificati":[{"brand":"...","codice_aams":"...","nuova_qty":N}],"messaggio":"..."}`,
+      system: `Sei l'assistente AI di TabaccAI. Ordine attuale:\n${ordineStr}\n\nCatalogo:\n${catalogoStringa}\n\nRispondi SOLO con JSON puro:\n{"aggiunti":[{"brand":"...","variante":"...","qty":N,"codice_aams":"..."}],"rimossi":[{"brand":"...","codice_aams":"..."}],"modificati":[{"brand":"...","codice_aams":"...","nuova_qty":N}],"messaggio":"..."}`,
       messages: [{ role: 'user', content: testo }],
     });
     let t = risposta.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
@@ -157,7 +159,7 @@ app.post('/api/note', async (req, res) => {
   try {
     const risposta = await anthropic.messages.create({
       model: 'claude-sonnet-4-5', max_tokens: 512,
-      system: `Analizza questa nota di un tabaccaio. Oggi: ${new Date().toISOString().split('T')[0]}\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledì 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}`,
+      system: `Analizza questa nota di un tabaccaio. Oggi: ${new Date().toISOString().split('T')[0]}\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledi 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}`,
       messages: [{ role:'user', content: testo }],
     });
     let t = risposta.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
@@ -202,20 +204,21 @@ app.get('/api/ordini/:session_id/ultimo', async (req, res) => {
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
 
-app.post('/api/excel', (req, res) => {
+app.post('/api/excel', async (req, res) => {
   const { prodotti: lista, data_ordine } = req.body;
   if (!lista || lista.length === 0) return res.status(400).json({ errore: 'Nessun prodotto' });
 
   const validi = lista.filter(p => p.codice_aams !== 'NON_TROVATO');
   let totale_tabaccaio = 0, totale_peso_kg = 0;
+  const data = data_ordine || new Date().toISOString().split('T')[0];
 
-  // Foglio 1: riepilogo completo per il tabaccaio
-  const righeOrdine = validi.map(p => {
+  // Righe riepilogo per email
+  const righeRiepilogo = validi.map(p => {
     const prezzi = calcolaPrezzoProdotto(p, p.qty);
     if (prezzi) { totale_tabaccaio += prezzi.totale_tabaccaio; totale_peso_kg += prezzi.peso_totale_kg; }
     return {
       'Codice AAMS': p.codice_aams,
-      'Descrizione': p.brand + (p.variante ? ` (${p.variante})` : ''),
+      'Descrizione': p.brand + (p.variante ? ' (' + p.variante + ')' : ''),
       'Stecche': p.qty,
       'Kgc': prezzi ? prezzi.quantita_kgc : '',
       'Prezzo Stecca (EUR)': prezzi ? prezzi.prezzo_stecca_tabaccaio : '',
@@ -224,41 +227,62 @@ app.post('/api/excel', (req, res) => {
       'Peso Totale (kg)': prezzi ? prezzi.peso_totale_kg : '',
     };
   });
-  righeOrdine.push({
+  righeRiepilogo.push({
     'Codice AAMS': '', 'Descrizione': 'TOTALE ORDINE',
     'Stecche': validi.reduce((s,p)=>s+(p.qty||0),0),
     'Kgc': parseFloat(totale_peso_kg.toFixed(3)),
     'Prezzo Stecca (EUR)': '',
     'Totale (EUR)': parseFloat(totale_tabaccaio.toFixed(2)),
-    'Peso Stecca (g)': '',
-    'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)),
+    'Peso Stecca (g)': '', 'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)),
   });
 
-  // Foglio 2: formato esatto Logista — Codice AAMS + Quantita in Kgc
+  // Righe formato Logista per download — identico al template ufficiale
   const righeLogista = validi.map(p => {
     const prod = catalogo.find(c => c.codice_aams === p.codice_aams);
-    const kgc = prod ? parseFloat((prod.unita_minima_kgc * p.qty).toFixed(3)) : p.qty * 0.2;
-    return {
-      'Codice AAMS': p.codice_aams,
-      'Quantita': kgc,
-    };
+    const kgc = prod ? parseFloat((prod.unita_minima_kgc * p.qty).toFixed(3)) : parseFloat((p.qty * 0.2).toFixed(3));
+    return { 'Codice AAMS': p.codice_aams, 'Quantita': kgc };
   });
 
-  const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.json_to_sheet(righeOrdine);
-  ws1['!cols'] = [{wch:14},{wch:32},{wch:9},{wch:8},{wch:18},{wch:14},{wch:16},{wch:16}];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Ordine');
+  // Workbook download — solo Sheet1 formato Logista
+  const wbDownload = XLSX.utils.book_new();
+  const wsLogista = XLSX.utils.json_to_sheet(righeLogista);
+  wsLogista['!cols'] = [{ wch: 11.8 }, { wch: 8.3 }];
+  const hStyle = { font: { name: 'Calibri', sz: 11, bold: true }, fill: { fgColor: { rgb: '21C5FF' }, patternType: 'solid' } };
+  if (wsLogista['A1']) wsLogista['A1'].s = hStyle;
+  if (wsLogista['B1']) wsLogista['B1'].s = hStyle;
+  XLSX.utils.book_append_sheet(wbDownload, wsLogista, 'Sheet1');
+  const bufferDownload = XLSX.write(wbDownload, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 
-  const ws2 = XLSX.utils.json_to_sheet(righeLogista);
-  ws2['!cols'] = [{wch:15},{wch:10}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Upload Logista');
+  // Workbook email — foglio riepilogo completo
+  const wbEmail = XLSX.utils.book_new();
+  const wsRiepilogo = XLSX.utils.json_to_sheet(righeRiepilogo);
+  wsRiepilogo['!cols'] = [{wch:14},{wch:32},{wch:9},{wch:8},{wch:18},{wch:14},{wch:16},{wch:16}];
+  XLSX.utils.book_append_sheet(wbEmail, wsRiepilogo, 'Riepilogo');
+  const bufferEmail = XLSX.write(wbEmail, { type: 'buffer', bookType: 'xlsx' });
 
-  const buffer = XLSX.write(wb, { type:'buffer', bookType:'xlsx' });
-  const nome = `ordine_tabaccai_${data_ordine||new Date().toISOString().split('T')[0]}.xlsx`;
-  res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
+  // Manda email con riepilogo
+  try {
+    await resend.emails.send({
+      from: 'TabaccAI <onboarding@resend.dev>',
+      to: 'edoardogiannini4@gmail.com',
+      subject: 'Riepilogo ordine TabaccAI — ' + data,
+      html: '<h2>Riepilogo ordine del ' + data + '</h2><p><strong>' + validi.length + ' prodotti</strong> — ' + validi.reduce((s,p)=>s+(p.qty||0),0) + ' stecche totali</p><p>Totale tabaccaio (90%): <strong>EUR ' + totale_tabaccaio.toFixed(2) + '</strong></p><p>Peso totale: ' + totale_peso_kg.toFixed(2) + ' kg</p><br><p>Il file Upload Logista e stato scaricato sul dispositivo.</p>',
+      attachments: [{
+        filename: 'riepilogo_ordine_' + data + '.xlsx',
+        content: bufferEmail.toString('base64'),
+      }],
+    });
+    console.log('Email riepilogo inviata per ordine del ' + data);
+  } catch (emailErr) {
+    console.error('Errore invio email:', emailErr.message);
+  }
+
+  // Download del file Logista
+  const nome = 'ordine_logista_' + data + '.xlsx';
+  res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.send(buffer);
+  res.send(bufferDownload);
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`TabaccAI v5 — ${catalogo.length} prodotti — porta ${PORT}`));
+app.listen(PORT, () => console.log(`TabaccAI v6 — ${catalogo.length} prodotti — porta ${PORT}`));
