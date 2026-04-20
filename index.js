@@ -284,8 +284,6 @@ app.post('/api/excel', async (req, res) => {
   res.send(bufferDownload);
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`TabaccAI v6 — ${catalogo.length} prodotti — porta ${PORT}`));
 
 // ENDPOINT: Salva ordine in corso
 app.post('/api/ordine-corrente', async (req, res) => {
@@ -315,7 +313,7 @@ app.get('/api/ordine-corrente/:session_id', async (req, res) => {
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
 
-// ENDPOINT: Cancella ordine in corso (quando completato)
+// ENDPOINT: Cancella ordine in corso
 app.delete('/api/ordine-corrente/:session_id', async (req, res) => {
   try {
     const { error } = await supabase
@@ -326,3 +324,6 @@ app.delete('/api/ordine-corrente/:session_id', async (req, res) => {
     res.json({ successo: true });
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`TabaccAI v6 — ${catalogo.length} prodotti — porta ${PORT}`));
