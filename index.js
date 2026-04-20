@@ -286,3 +286,43 @@ app.post('/api/excel', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`TabaccAI v6 — ${catalogo.length} prodotti — porta ${PORT}`));
+
+// ENDPOINT: Salva ordine in corso
+app.post('/api/ordine-corrente', async (req, res) => {
+  const { prodotti, session_id } = req.body;
+  if (!session_id) return res.status(400).json({ errore: 'Session ID mancante' });
+  try {
+    const { error } = await supabase.from('ordine_corrente').upsert({
+      session_id,
+      prodotti: prodotti || [],
+      aggiornato_at: new Date().toISOString()
+    }, { onConflict: 'session_id' });
+    if (error) throw error;
+    res.json({ successo: true });
+  } catch (err) { res.status(500).json({ errore: err.message }); }
+});
+
+// ENDPOINT: Recupera ordine in corso
+app.get('/api/ordine-corrente/:session_id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('ordine_corrente')
+      .select('*')
+      .eq('session_id', req.params.session_id)
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ successo: true, ordine: data || null });
+  } catch (err) { res.status(500).json({ errore: err.message }); }
+});
+
+// ENDPOINT: Cancella ordine in corso (quando completato)
+app.delete('/api/ordine-corrente/:session_id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('ordine_corrente')
+      .delete()
+      .eq('session_id', req.params.session_id);
+    if (error) throw error;
+    res.json({ successo: true });
+  } catch (err) { res.status(500).json({ errore: err.message }); }
+});
