@@ -5,6 +5,9 @@ const Anthropic = require('@anthropic-ai/sdk');
 const XLSX = require('xlsx');
 const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
+const OpenAI = require('openai');
+const fs = require('fs');
+const path = require('path');
 const { catalogo } = require('./catalogo');
 
 const app = express();
@@ -14,9 +17,10 @@ app.use(express.json({ limit: '10mb' }));
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const resend = new Resend(process.env.RESEND_API_KEY);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const catalogoStringa = catalogo.map(p =>
-  `${p.brand} (${p.variante}) - AAMS: ${p.codice_aams} - €${p.prezzo_pacchetto}/pacco`
+  `${p.brand} (${p.variante}) - AAMS: ${p.codice_aams} - ${p.prezzo_pacchetto}/pacco`
 ).join('\n');
 
 const SYSTEM_VOICE = `Sei l'assistente AI di TabaccAI per tabaccai italiani.
@@ -42,9 +46,9 @@ ${catalogoStringa}
 
 Regole:
 1. Identifica prodotti anche con errori gravi di pronuncia
-2. Le quantita sono in STECCHE — "tre" = 3 stecche
+2. Le quantita sono in STECCHE
 3. "morbide/soft/cartoccio" = cerca variante Soft dello stesso brand
-4. Rispondi SOLO con JSON array puro — inizia con [ finisce con ]
+4. Rispondi SOLO con JSON array puro
 5. Zero testo aggiuntivo, zero markdown, zero backtick
 
 Formato: [{"brand":"nome esatto","variante":"variante","qty":numero,"codice_aams":"codice","testo_originale":"detto","corretto":true/false}]
@@ -72,7 +76,7 @@ function calcolaPrezzoProdotto(prodotto, qtaStecche) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', messaggio: 'TabaccAI backend v6', prodotti: catalogo.length });
+  res.json({ status: 'ok', messaggio: 'TabaccAI backend v7', prodotti: catalogo.length });
 });
 
 app.post('/api/voice', async (req, res) => {
@@ -157,9 +161,10 @@ app.post('/api/note', async (req, res) => {
   const { testo, session_id } = req.body;
   if (!testo || !session_id) return res.status(400).json({ errore: 'Dati mancanti' });
   try {
+    const oggi = new Date().toISOString().split('T')[0];
     const risposta = await anthropic.messages.create({
       model: 'claude-sonnet-4-5', max_tokens: 512,
-      system: `Analizza questa nota di un tabaccaio. Oggi: ${new Date().toISOString().split('T')[0]}\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledi 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}`,
+      system: 'Analizza questa nota di un tabaccaio. Oggi: ' + oggi + '\nRispondi SOLO con JSON puro:\n{"prodotti":[{"brand":"...","codice_aams":"...","qty":1}],"scadenza_label":"Mercoledi 23 Apr" o null,"scadenza_data":"2026-04-23" o null,"testo_pulito":"nota senza date"}',
       messages: [{ role:'user', content: testo }],
     });
     let t = risposta.content[0].text.trim().replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
@@ -207,123 +212,143 @@ app.get('/api/ordini/:session_id/ultimo', async (req, res) => {
 app.post('/api/excel', async (req, res) => {
   const { prodotti: lista, data_ordine } = req.body;
   if (!lista || lista.length === 0) return res.status(400).json({ errore: 'Nessun prodotto' });
-
   const validi = lista.filter(p => p.codice_aams !== 'NON_TROVATO');
   let totale_tabaccaio = 0, totale_peso_kg = 0;
   const data = data_ordine || new Date().toISOString().split('T')[0];
-
-  // Righe riepilogo per email
   const righeRiepilogo = validi.map(p => {
     const prezzi = calcolaPrezzoProdotto(p, p.qty);
     if (prezzi) { totale_tabaccaio += prezzi.totale_tabaccaio; totale_peso_kg += prezzi.peso_totale_kg; }
-    return {
-      'Codice AAMS': p.codice_aams,
-      'Descrizione': p.brand + (p.variante ? ' (' + p.variante + ')' : ''),
-      'Stecche': p.qty,
-      'Kgc': prezzi ? prezzi.quantita_kgc : '',
-      'Prezzo Stecca (EUR)': prezzi ? prezzi.prezzo_stecca_tabaccaio : '',
-      'Totale (EUR)': prezzi ? prezzi.totale_tabaccaio : '',
-      'Peso Stecca (g)': prezzi ? prezzi.peso_stecca_g : '',
-      'Peso Totale (kg)': prezzi ? prezzi.peso_totale_kg : '',
-    };
+    return { 'Codice AAMS': p.codice_aams, 'Descrizione': p.brand + (p.variante ? ' (' + p.variante + ')' : ''), 'Stecche': p.qty, 'Kgc': prezzi ? prezzi.quantita_kgc : '', 'Prezzo Stecca (EUR)': prezzi ? prezzi.prezzo_stecca_tabaccaio : '', 'Totale (EUR)': prezzi ? prezzi.totale_tabaccaio : '', 'Peso Stecca (g)': prezzi ? prezzi.peso_stecca_g : '', 'Peso Totale (kg)': prezzi ? prezzi.peso_totale_kg : '' };
   });
-  righeRiepilogo.push({
-    'Codice AAMS': '', 'Descrizione': 'TOTALE ORDINE',
-    'Stecche': validi.reduce((s,p)=>s+(p.qty||0),0),
-    'Kgc': parseFloat(totale_peso_kg.toFixed(3)),
-    'Prezzo Stecca (EUR)': '',
-    'Totale (EUR)': parseFloat(totale_tabaccaio.toFixed(2)),
-    'Peso Stecca (g)': '', 'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)),
-  });
-
-  // Righe formato Logista per download — identico al template ufficiale
+  righeRiepilogo.push({ 'Codice AAMS': '', 'Descrizione': 'TOTALE ORDINE', 'Stecche': validi.reduce((s,p)=>s+(p.qty||0),0), 'Kgc': parseFloat(totale_peso_kg.toFixed(3)), 'Prezzo Stecca (EUR)': '', 'Totale (EUR)': parseFloat(totale_tabaccaio.toFixed(2)), 'Peso Stecca (g)': '', 'Peso Totale (kg)': parseFloat(totale_peso_kg.toFixed(3)) });
   const righeLogista = validi.map(p => {
     const prod = catalogo.find(c => c.codice_aams === p.codice_aams);
     const kgc = prod ? parseFloat((prod.unita_minima_kgc * p.qty).toFixed(3)) : parseFloat((p.qty * 0.2).toFixed(3));
     return { 'Codice AAMS': p.codice_aams, 'Quantita': kgc };
   });
-
-  // Workbook download — solo Sheet1 formato Logista
   const wbDownload = XLSX.utils.book_new();
   const wsLogista = XLSX.utils.json_to_sheet(righeLogista);
   wsLogista['!cols'] = [{ wch: 11.8 }, { wch: 8.3 }];
-  const hStyle = { font: { name: 'Calibri', sz: 11, bold: true }, fill: { fgColor: { rgb: '21C5FF' }, patternType: 'solid' } };
-  if (wsLogista['A1']) wsLogista['A1'].s = hStyle;
-  if (wsLogista['B1']) wsLogista['B1'].s = hStyle;
   XLSX.utils.book_append_sheet(wbDownload, wsLogista, 'Sheet1');
-  const bufferDownload = XLSX.write(wbDownload, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
-
-  // Workbook email — foglio riepilogo completo
+  const bufferDownload = XLSX.write(wbDownload, { type: 'buffer', bookType: 'xlsx' });
   const wbEmail = XLSX.utils.book_new();
   const wsRiepilogo = XLSX.utils.json_to_sheet(righeRiepilogo);
   wsRiepilogo['!cols'] = [{wch:14},{wch:32},{wch:9},{wch:8},{wch:18},{wch:14},{wch:16},{wch:16}];
   XLSX.utils.book_append_sheet(wbEmail, wsRiepilogo, 'Riepilogo');
   const bufferEmail = XLSX.write(wbEmail, { type: 'buffer', bookType: 'xlsx' });
-
-  // Manda email con riepilogo
   try {
     await resend.emails.send({
       from: 'TabaccAI <onboarding@resend.dev>',
       to: 'edoardogiannini4@gmail.com',
       subject: 'Riepilogo ordine TabaccAI — ' + data,
-      html: '<h2>Riepilogo ordine del ' + data + '</h2><p><strong>' + validi.length + ' prodotti</strong> — ' + validi.reduce((s,p)=>s+(p.qty||0),0) + ' stecche totali</p><p>Totale tabaccaio (90%): <strong>EUR ' + totale_tabaccaio.toFixed(2) + '</strong></p><p>Peso totale: ' + totale_peso_kg.toFixed(2) + ' kg</p><br><p>Il file Upload Logista e stato scaricato sul dispositivo.</p>',
-      attachments: [{
-        filename: 'riepilogo_ordine_' + data + '.xlsx',
-        content: bufferEmail.toString('base64'),
-      }],
+      html: '<h2>Riepilogo ordine del ' + data + '</h2><p><strong>' + validi.length + ' prodotti</strong></p><p>Totale tabaccaio (90%): <strong>EUR ' + totale_tabaccaio.toFixed(2) + '</strong></p>',
+      attachments: [{ filename: 'riepilogo_ordine_' + data + '.xlsx', content: bufferEmail.toString('base64') }],
     });
-    console.log('Email riepilogo inviata per ordine del ' + data);
-  } catch (emailErr) {
-    console.error('Errore invio email:', emailErr.message);
-  }
-
-  // Download del file Logista
+  } catch (emailErr) { console.error('Errore invio email:', emailErr.message); }
   const nome = 'ordine_logista_' + data + '.xlsx';
   res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.send(bufferDownload);
 });
 
-
-// ENDPOINT: Salva ordine in corso
 app.post('/api/ordine-corrente', async (req, res) => {
   const { prodotti, session_id } = req.body;
   if (!session_id) return res.status(400).json({ errore: 'Session ID mancante' });
   try {
-    const { error } = await supabase.from('ordine_corrente').upsert({
-      session_id,
-      prodotti: prodotti || [],
-      aggiornato_at: new Date().toISOString()
-    }, { onConflict: 'session_id' });
+    const { error } = await supabase.from('ordine_corrente').upsert({ session_id, prodotti: prodotti || [], aggiornato_at: new Date().toISOString() }, { onConflict: 'session_id' });
     if (error) throw error;
     res.json({ successo: true });
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
 
-// ENDPOINT: Recupera ordine in corso
 app.get('/api/ordine-corrente/:session_id', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('ordine_corrente')
-      .select('*')
-      .eq('session_id', req.params.session_id)
-      .single();
+    const { data, error } = await supabase.from('ordine_corrente').select('*').eq('session_id', req.params.session_id).single();
     if (error && error.code !== 'PGRST116') throw error;
     res.json({ successo: true, ordine: data || null });
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
 
-// ENDPOINT: Cancella ordine in corso
 app.delete('/api/ordine-corrente/:session_id', async (req, res) => {
   try {
-    const { error } = await supabase
-      .from('ordine_corrente')
-      .delete()
-      .eq('session_id', req.params.session_id);
+    const { error } = await supabase.from('ordine_corrente').delete().eq('session_id', req.params.session_id);
     if (error) throw error;
     res.json({ successo: true });
   } catch (err) { res.status(500).json({ errore: err.message }); }
 });
 
+app.post('/api/whisper', async (req, res) => {
+  const { audio_base64, mime_type, session_id } = req.body;
+  if (!audio_base64) return res.status(400).json({ errore: 'Audio mancante' });
+  try {
+    const ext = mime_type && mime_type.includes('webm') ? 'webm' : mime_type && mime_type.includes('mp4') ? 'mp4' : 'webm';
+    const tmpFile = path.join('/tmp', 'audio_' + Date.now() + '.' + ext);
+    fs.writeFileSync(tmpFile, Buffer.from(audio_base64, 'base64'));
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(tmpFile),
+      model: 'whisper-1',
+      language: 'it',
+      response_format: 'text'
+    });
+    fs.unlinkSync(tmpFile);
+    res.json({ testo: transcription.trim() });
+  } catch (err) {
+    console.error('Errore Whisper:', err.message);
+    res.status(500).json({ errore: err.message });
+  }
+});
+
+app.post('/api/excel-email', async (req, res) => {
+  const { prodotti: lista, email, data_ordine, session_id } = req.body;
+  if (!lista || !email) return res.status(400).json({ errore: 'Prodotti e email obbligatori' });
+  try {
+    const validi = lista.filter(p => p.codice_aams !== 'NON_TROVATO');
+    const data = data_ordine || new Date().toISOString().split('T')[0];
+    let totale_tabaccaio = 0, totale_peso_kg = 0;
+    const righeLogista = validi.map(p => {
+      const prod = catalogo.find(c => c.codice_aams === p.codice_aams);
+      const prezzi = calcolaPrezzoProdotto(p, p.qty);
+      if (prezzi) { totale_tabaccaio += prezzi.totale_tabaccaio; totale_peso_kg += prezzi.peso_totale_kg; }
+      const kgc = prod ? parseFloat((prod.unita_minima_kgc * p.qty).toFixed(3)) : parseFloat((p.qty * 0.2).toFixed(3));
+      return { 'Codice AAMS': p.codice_aams, 'Quantita': kgc };
+    });
+    const righeRiepilogo = validi.map(p => {
+      const prezzi = calcolaPrezzoProdotto(p, p.qty);
+      return { 'Prodotto': p.brand + (p.variante ? ' (' + p.variante + ')' : ''), 'Stecche': p.qty, 'Costo (EUR)': prezzi ? prezzi.totale_tabaccaio : '' };
+    });
+    const wb = XLSX.utils.book_new();
+    const wsLogista = XLSX.utils.json_to_sheet(righeLogista);
+    wsLogista['!cols'] = [{ wch: 11.8 }, { wch: 8.3 }];
+    XLSX.utils.book_append_sheet(wb, wsLogista, 'Sheet1');
+    const wsRiep = XLSX.utils.json_to_sheet(righeRiepilogo);
+    XLSX.utils.book_append_sheet(wb, wsRiep, 'Riepilogo');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const nomeFile = 'ordine_logista_' + data + '.xlsx';
+    await resend.emails.send({
+      from: 'TabaccAI <onboarding@resend.dev>',
+      to: [email],
+      subject: 'Ordine TabaccAI — ' + data,
+      html: '<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><div style="background:#3A1A08;padding:20px;border-radius:10px 10px 0 0"><h1 style="color:white;margin:0;font-size:24px">Tabacc<span style="color:#C9973A">AI</span></h1></div><div style="background:white;padding:24px;border:1px solid #E8E0D5;border-top:none;border-radius:0 0 10px 10px"><h2 style="color:#3A1A08;margin:0 0 12px">Il tuo ordine e pronto!</h2><p style="color:#555;font-size:15px;line-height:1.6">In allegato: <strong>' + validi.length + ' prodotti</strong>, ' + validi.reduce(function(s,p){return s+(p.qty||0)},0) + ' stecche<br>Totale: <strong>EUR ' + totale_tabaccaio.toFixed(2) + '</strong> - Peso: ' + totale_peso_kg.toFixed(2) + ' kg</p><div style="background:#EAF4EE;border:1px solid #C3E6CB;border-radius:8px;padding:14px;margin:16px 0"><strong style="color:#1A6E3A">Come caricare su Logista:</strong><ol style="color:#555;font-size:14px;margin:8px 0 0;padding-left:20px;line-height:1.8"><li>Salva il file allegato sul desktop</li><li>Vai su logistaitalia.it - Ordini</li><li>Clicca Carica da file Excel</li><li>Seleziona il file e conferma</li></ol></div></div></div>',
+      attachments: [{ filename: nomeFile, content: buffer.toString('base64') }],
+    });
+    if (session_id) {
+      await supabase.from('ordini').insert({ session_id, prodotti: lista }).catch(console.error);
+    }
+    res.json({ successo: true, messaggio: 'Email inviata a ' + email });
+  } catch (err) {
+    console.error('Errore excel-email:', err.message);
+    res.status(500).json({ errore: err.message });
+  }
+});
+
+app.post('/api/utente/email', async (req, res) => {
+  const { session_id, email } = req.body;
+  if (!session_id || !email) return res.json({ errore: 'Dati mancanti' });
+  try {
+    await supabase.from('ordine_corrente').upsert({ session_id, email, aggiornato_at: new Date().toISOString() }, { onConflict: 'session_id' }).catch(console.error);
+    res.json({ successo: true });
+  } catch (err) { res.json({ errore: err.message }); }
+});
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`TabaccAI v6 — ${catalogo.length} prodotti — porta ${PORT}`));
+app.listen(PORT, function() { console.log('TabaccAI v7 — ' + catalogo.length + ' prodotti — porta ' + PORT); });
