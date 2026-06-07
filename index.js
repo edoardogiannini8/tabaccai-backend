@@ -156,15 +156,21 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.post('/api/auth/verify', async (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ errore: 'Token mancante' });
-  const email = verificaTokenMagico(token);
-  if (!email) return res.status(401).json({ errore: 'Link non valido o scaduto. Richiedi un nuovo link di accesso.' });
-  const session_id = 'u_' + crypto.createHash('sha256').update(email).digest('hex').slice(0, 14);
-  await supabase.from('ordine_corrente').upsert({
-    session_id, email, aggiornato_at: new Date().toISOString()
-  }, { onConflict: 'session_id' }).catch(() => {});
-  res.json({ successo: true, email, session_id });
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ errore: 'Token mancante' });
+    const email = verificaTokenMagico(token);
+    if (!email) return res.status(401).json({ errore: 'Link non valido o scaduto. Richiedi un nuovo link di accesso.' });
+    const session_id = 'u_' + crypto.createHash('sha256').update(email).digest('hex').slice(0, 14);
+    // Fire-and-forget: auth succeeds regardless of Supabase state
+    supabase.from('ordine_corrente').upsert({
+      session_id, email, aggiornato_at: new Date().toISOString()
+    }, { onConflict: 'session_id' }).catch(e => console.error('Supabase upsert error:', e?.message));
+    res.json({ successo: true, email, session_id });
+  } catch (err) {
+    console.error('Errore verify:', err.message);
+    res.status(500).json({ errore: 'Errore del server. Riprova.' });
+  }
 });
 
 app.post('/api/voice', async (req, res) => {
