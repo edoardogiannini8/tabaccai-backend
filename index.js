@@ -162,11 +162,13 @@ app.post('/api/auth/verify', async (req, res) => {
     const email = verificaTokenMagico(token);
     if (!email) return res.status(401).json({ errore: 'Link non valido o scaduto. Richiedi un nuovo link di accesso.' });
     const session_id = 'u_' + crypto.createHash('sha256').update(email).digest('hex').slice(0, 14);
-    // Fire-and-forget: auth succeeds regardless of Supabase state
-    supabase.from('ordine_corrente').upsert({
-      session_id, email, aggiornato_at: new Date().toISOString()
-    }, { onConflict: 'session_id' }).catch(e => console.error('Supabase upsert error:', e?.message));
+    // Send auth response FIRST, then fire-and-forget Supabase
     res.json({ successo: true, email, session_id });
+    try {
+      supabase.from('ordine_corrente').upsert({
+        session_id, email, aggiornato_at: new Date().toISOString()
+      }, { onConflict: 'session_id' }).catch(e => console.error('Supabase upsert error:', e?.message));
+    } catch(e) { console.error('Supabase sync error:', e?.message); }
   } catch (err) {
     console.error('Errore verify:', err.message);
     res.status(500).json({ errore: 'Errore del server. Riprova.' });
