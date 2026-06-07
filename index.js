@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const XLSX = require('xlsx');
 const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
@@ -17,10 +17,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const mailer = nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: 'edoardogiannini4@gmail.com', pass: process.env.GMAIL_APP_PASSWORD }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const TOKEN_SECRET = process.env.TOKEN_SECRET || 'tabaccai_dev_secret_change_in_prod';
@@ -117,10 +114,10 @@ app.post('/api/auth/login', async (req, res) => {
   const token = generaTokenMagico(emailPulita);
   const link = `${FRONTEND_URL}/index.html?token=${token}`;
   try {
-    await mailer.sendMail({
-      from: 'TabaccAI <edoardogiannini4@gmail.com>',
+    await resend.emails.send({
+      from: 'TabaccAI <onboarding@resend.dev>',
       to: emailPulita,
-      subject: '🔑 Il tuo link di accesso a TabaccAI',
+      subject: 'Il tuo link di accesso a TabaccAI',
       html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
         <div style="background:#3A1A08;padding:28px;border-radius:14px 14px 0 0;text-align:center">
           <h1 style="color:white;font-size:32px;margin:0;letter-spacing:-0.5px">
@@ -360,14 +357,14 @@ app.post('/api/excel', async (req, res) => {
       emailUtente = sessione?.email || null;
     }
     if (emailUtente) {
-      await mailer.sendMail({
-        from: 'TabaccAI <edoardogiannini4@gmail.com>',
+      await resend.emails.send({
+        from: 'TabaccAI <onboarding@resend.dev>',
         to: emailUtente,
         subject: 'Riepilogo ordine TabaccAI — ' + data,
         html: '<h2>Riepilogo ordine del ' + data + '</h2><p><strong>' + validi.length + ' prodotti</strong> — ' + validi.reduce((s,p)=>s+(p.qty||0),0) + ' stecche totali</p><p>Totale tabaccaio (90%): <strong>EUR ' + totale_tabaccaio.toFixed(2) + '</strong></p><p>Peso totale: ' + totale_peso_kg.toFixed(2) + ' kg</p><br><p>Il file Upload Logista è stato scaricato sul dispositivo.</p>',
         attachments: [{
           filename: 'riepilogo_ordine_' + data + '.xlsx',
-          content: bufferEmail,
+          content: bufferEmail.toString('base64'),
         }],
       });
       console.log('Email riepilogo inviata a ' + emailUtente + ' per ordine del ' + data);
@@ -467,10 +464,10 @@ app.post('/api/excel-email', async (req, res) => {
 
     const nomeFile = 'ordine_logista_' + data + '.xlsx';
 
-    await mailer.sendMail({
-      from: 'TabaccAI <edoardogiannini4@gmail.com>',
+    await resend.emails.send({
+      from: 'TabaccAI <onboarding@resend.dev>',
       to: email,
-      subject: '📦 Ordine TabaccAI — ' + data,
+      subject: 'Ordine TabaccAI — ' + data,
       html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto">
         <div style="background:#3A1A08;padding:20px;border-radius:10px 10px 0 0">
           <h1 style="color:white;margin:0;font-size:24px">Tabacc<span style="color:#C9973A">AI</span></h1>
@@ -493,7 +490,7 @@ app.post('/api/excel-email', async (req, res) => {
           <p style="color:#888;font-size:12px;margin-top:16px">Generato da TabaccAI — ${new Date().toLocaleString('it-IT')}</p>
         </div>
       </div>`,
-      attachments: [{ filename: nomeFile, content: buffer }],
+      attachments: [{ filename: nomeFile, content: buffer.toString('base64') }],
     });
 
     if (session_id) {
