@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Accedi — TabaccAI</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --brown: #3A1A08;
+      --gold: #C9973A;
+      --cream: #F5F0E8;
+      --border: #E8E0D5;
+      --green: #1A6E3A;
+      --gray: #4A4A4A;
+      --light-gray: #888;
+      --red: #C0392B;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      font-size: 18px;
+      line-height: 1.65;
+      color: var(--gray);
+      background: var(--cream);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: var(--brown);
+      padding: 16px 28px;
+      text-align: center;
+    }
+    .logo { font-size: 30px; font-weight: 800; color: white; text-decoration: none; }
+    .logo span { color: var(--gold); }
+
+    /* ── CONTENUTO ── */
+    .contenuto {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 44px 40px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 4px 24px rgba(58,26,8,0.08);
+    }
+
+    .card-titolo {
+      font-size: 30px;
+      font-weight: 800;
+      color: var(--brown);
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .card-sottotitolo {
+      font-size: 17px;
+      color: var(--light-gray);
+      text-align: center;
+      margin-bottom: 36px;
+      line-height: 1.6;
+    }
+
+    /* ── FORM ── */
+    .form-label {
+      display: block;
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--brown);
+      margin-bottom: 10px;
+    }
+    .form-input {
+      width: 100%;
+      padding: 18px 20px;
+      font-size: 19px;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      outline: none;
+      background: white;
+      color: #1A1A1A;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+    .form-input:focus { border-color: var(--gold); }
+    .form-input::placeholder { color: #BEB0A0; }
+
+    .btn-submit {
+      width: 100%;
+      padding: 20px;
+      margin-top: 20px;
+      background: var(--brown);
+      color: white;
+      font-size: 20px;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .btn-submit:hover { background: #5C2E10; }
+    .btn-submit:active { transform: scale(0.98); }
+    .btn-submit:disabled { background: #BEB0A0; cursor: not-allowed; transform: none; }
+
+    /* ── SPINNER ── */
+    .spinner {
+      width: 22px; height: 22px;
+      border: 3px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ERRORE ── */
+    .errore {
+      background: #FFF3F3;
+      border: 1px solid #FFCCCC;
+      border-radius: 10px;
+      padding: 14px 18px;
+      color: var(--red);
+      font-size: 16px;
+      margin-top: 18px;
+      display: none;
+      line-height: 1.5;
+    }
+
+    /* ── STATO SUCCESSO ── */
+    .successo-stato { display: none; text-align: center; }
+    .successo-icona { font-size: 72px; margin-bottom: 20px; line-height: 1; }
+    .successo-titolo {
+      font-size: 26px; font-weight: 800;
+      color: var(--green); margin-bottom: 12px;
+    }
+    .successo-testo {
+      font-size: 18px; color: var(--gray);
+      line-height: 1.7; margin-bottom: 28px;
+    }
+    .successo-email {
+      background: var(--cream);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      font-size: 17px; color: var(--brown);
+      font-weight: 600; word-break: break-all;
+    }
+    .btn-rispedisci {
+      margin-top: 24px;
+      background: none;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 24px;
+      font-size: 16px;
+      color: var(--gray);
+      cursor: pointer;
+      width: 100%;
+      transition: border-color 0.15s;
+    }
+    .btn-rispedisci:hover { border-color: var(--brown); color: var(--brown); }
+
+    /* ── LINK TORNA ── */
+    .torna {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 16px;
+      color: var(--light-gray);
+    }
+    .torna a { color: var(--brown); text-decoration: none; font-weight: 600; }
+    .torna a:hover { text-decoration: underline; }
+
+    /* ── FOOTER ── */
+    .footer {
+      background: var(--brown);
+      color: rgba(255,255,255,0.5);
+      text-align: center;
+      padding: 20px 24px;
+      font-size: 14px;
+    }
+
+    @media (max-width: 520px) {
+      .card { padding: 32px 22px; border-radius: 16px; }
+      .card-titolo { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <a href="landing.html" class="logo">Tabacc<span>AI</span></a>
+</header>
+
+<div class="contenuto">
+  <div class="card">
+
+    <!-- STATO: FORM -->
+    <div id="statoForm">
+      <h1 class="card-titolo">Accedi a TabaccAI</h1>
+      <p class="card-sottotitolo">
+        Inserisci la tua email.<br>
+        Ti mandiamo un link per entrare — nessuna password.
+      </p>
+
+      <label class="form-label" for="emailInput">La tua email</label>
+      <input
+        class="form-input"
+        type="email"
+        id="emailInput"
+        placeholder="nome@esempio.it"
+        autocomplete="email"
+        inputmode="email"
+        spellcheck="false"
+        autocapitalize="none"
+      >
+
+      <button class="btn-submit" id="btnSubmit" onclick="inviaLink()">
+        <span id="btnTesto">Ricevi il link di accesso →</span>
+        <div class="spinner" id="spinner"></div>
+      </button>
+
+      <div class="errore" id="erroreBox"></div>
+
+      <div class="torna">
+        <a href="landing.html">← Torna alla home</a>
+      </div>
+    </div>
+
+    <!-- STATO: SUCCESSO -->
+    <div class="successo-stato" id="statoSuccesso">
+      <div class="successo-icona">📬</div>
+      <h2 class="successo-titolo">Link inviato!</h2>
+      <p class="successo-testo">
+        Controlla la tua email. Abbiamo inviato il link di accesso a:
+      </p>
+      <div class="successo-email" id="successoEmail"></div>
+      <p style="font-size:16px;color:var(--light-gray);margin-top:16px;line-height:1.6">
+        Clicca il link nell'email per entrare nell'app.<br>
+        <strong>Non trovi l'email?</strong> Controlla la cartella spam o promozioni.
+      </p>
+      <button class="btn-rispedisci" onclick="rispedisci()">
+        📨 Non hai ricevuto l'email? Rispedisci
+      </button>
+      <div class="torna" style="margin-top:16px">
+        <a href="landing.html">← Torna alla home</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<footer class="footer">
+  © 2026 TabaccAI &nbsp;·&nbsp; <a href="mailto:edoardogiannini4@gmail.com" style="color:var(--gold)">edoardogiannini4@gmail.com</a>
+</footer>
+
+<script>
+  const BACKEND = 'https://tabaccai-backend-production.up.railway.app';
+  let emailInviata = '';
+
+  // Se già autenticato, vai direttamente all'app
+  try {
+    const auth = JSON.parse(localStorage.getItem('tabaccai_auth') || 'null');
+    if (auth && auth.session_id) window.location.replace('index.html');
+  } catch {}
+
+  async function inviaLink() {
+    const email = document.getElementById('emailInput').value.trim();
+    const erroreBox = document.getElementById('erroreBox');
+
+    // Validation
+    if (!email) {
+      mostraErrore('Inserisci la tua email per continuare.');
+      document.getElementById('emailInput').focus();
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      mostraErrore("L'email inserita non è valida. Controlla e riprova.");
+      return;
+    }
+
+    // Loading state
+    setLoading(true);
+    erroreBox.style.display = 'none';
+
+    try {
+      const res = await fetch(BACKEND + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok || data.errore) throw new Error(data.errore || 'Errore del server');
+
+      // Successo
+      emailInviata = email;
+      document.getElementById('successoEmail').textContent = email;
+      document.getElementById('statoForm').style.display = 'none';
+      document.getElementById('statoSuccesso').style.display = 'block';
+
+    } catch (err) {
+      mostraErrore(err.message || 'Si è verificato un errore. Riprova tra qualche istante.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function rispedisci() {
+    const btn = document.querySelector('.btn-rispedisci');
+    btn.disabled = true;
+    btn.textContent = 'Invio in corso...';
+    try {
+      await fetch(BACKEND + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailInviata })
+      });
+      btn.textContent = '✅ Link rispedito! Controlla la tua email.';
+    } catch {
+      btn.textContent = 'Errore. Riprova.';
+      btn.disabled = false;
+    }
+    setTimeout(() => {
+      btn.textContent = '📨 Non hai ricevuto l\'email? Rispedisci';
+      btn.disabled = false;
+    }, 10000);
+  }
+
+  function mostraErrore(msg) {
+    const box = document.getElementById('erroreBox');
+    box.textContent = msg;
+    box.style.display = 'block';
+  }
+
+  function setLoading(loading) {
+    const btn = document.getElementById('btnSubmit');
+    const testo = document.getElementById('btnTesto');
+    const spinner = document.getElementById('spinner');
+    btn.disabled = loading;
+    testo.textContent = loading ? 'Invio in corso...' : 'Ricevi il link di accesso →';
+    spinner.style.display = loading ? 'block' : 'none';
+  }
+
+  // Submit anche con Enter
+  document.getElementById('emailInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') inviaLink();
+  });
+</script>
+
+</body>
+</html>

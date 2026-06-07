@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>body{overscroll-behavior-y:contain;}</style>
+  <title>TabaccAI</title>
+  <!-- Auth pre-check: redirect immediato se non autenticato e nessun token in URL -->
+  <script>
+    (function() {
+      var token = new URLSearchParams(window.location.search).get('token');
+      if (!token) {
+        try { if (!JSON.parse(localStorage.getItem('tabaccai_auth'))) window.location.replace('login.html'); }
+        catch(e) { window.location.replace('login.html'); }
+      }
+    })();
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --brown: #3A1A08; --gold: #C9973A; --cream: #F5F0E8;
+      --border: #E8E0D5; --green: #1A6E3A; --red: #C0392B; --blue: #1A4A7A;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--cream); }
+
+    .header { background: var(--brown); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .logo { font-size: 26px; font-weight: 800; color: white; }
+    .logo span { color: var(--gold); }
+    .header-sub { font-size: 13px; color: rgba(255,255,255,0.5); }
+
+    .main-layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 56px); }
+
+    /* SIDEBAR */
+    .sidebar { background: white; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+    .sidebar-header { background: var(--brown); padding: 16px 18px; color: white; }
+    .sidebar-header h2 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+    .sidebar-header p { font-size: 12px; color: rgba(255,255,255,0.5); }
+    .note-input-area { padding: 14px; border-bottom: 1px solid var(--border); background: #FDFBF8; }
+    .note-input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .note-input { flex: 1; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; background: white; }
+    .note-input:focus { border-color: var(--gold); }
+    .btn-icon { width: 40px; height: 40px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .btn-mic-nota { background: var(--brown); color: white; }
+    .btn-mic-nota.ascoltando { background: var(--red); animation: pulse 1s infinite; }
+    .btn-foto-nota { background: var(--gold); color: white; }
+    .btn-salva-nota { width: 100%; padding: 9px; background: var(--brown); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .scadenza-row { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+    .scadenza-chip { padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--border); background: white; font-size: 12px; cursor: pointer; color: #888; transition: all 0.15s; }
+    .scadenza-chip.selected { background: var(--brown); border-color: var(--brown); color: white; }
+    .note-lista { flex: 1; overflow-y: auto; padding: 12px; }
+    .nota-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; position: relative; }
+    .nota-card.oggi { border-left: 3px solid var(--gold); background: #FFFDF5; }
+    .nota-card.in-scadenza { border-left: 3px solid var(--red); }
+    .nota-testo { font-size: 14px; color: #333; line-height: 1.4; margin-bottom: 6px; padding-right: 24px; }
+    .nota-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .nota-scadenza { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--cream); color: var(--brown); }
+    .nota-scadenza.urgente { background: #FFEEEE; color: var(--red); }
+    .nota-scadenza.oggi-label { background: #FFF5E0; color: #B8700A; }
+    .nota-aggiungi { font-size: 11px; color: var(--blue); cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; }
+    .nota-completa { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #CCC; cursor: pointer; font-size: 18px; }
+    .nota-completa:hover { color: var(--green); }
+    .note-vuote { text-align: center; color: #888; font-size: 13px; padding: 30px 20px; line-height: 1.6; }
+    .reminder-banner { margin: 10px; background: #FFF5E0; border: 1px solid #FFDDAA; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #8B5E00; display: none; }
+    .reminder-banner.visibile { display: block; }
+    .reminder-banner strong { display: block; margin-bottom: 4px; }
+
+    /* MAIN */
+    .main-content { padding: 24px; overflow-y: auto; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+    .tab { padding: 8px 18px; border-radius: 8px; border: 1.5px solid var(--border); background: white; font-size: 14px; font-weight: 500; cursor: pointer; color: #888; transition: all 0.15s; }
+    .tab.active { background: var(--brown); border-color: var(--brown); color: white; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* MIC */
+    .mic-section { text-align: center; padding: 20px 0 16px; }
+    .mic-btn { width: 120px; height: 120px; border-radius: 50%; background: var(--brown); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; transition: transform 0.1s; box-shadow: 0 4px 20px rgba(58,26,8,0.25); }
+    .mic-btn:hover { transform: scale(1.04); }
+    .mic-btn.ascoltando { background: var(--red); animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(192,57,43,0.4)} 70%{box-shadow:0 0 0 18px rgba(192,57,43,0)} 100%{box-shadow:0 0 0 0 rgba(192,57,43,0)} }
+    .mic-btn svg { width: 48px; height: 48px; }
+    .mic-label { font-size: 18px; color: var(--brown); font-weight: 600; margin-bottom: 6px; }
+    .mic-sublabel { font-size: 13px; color: #888; }
+    .quick-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+    .btn-quick { padding: 8px 16px; border-radius: 8px; border: 1.5px solid var(--border); background: white; font-size: 13px; cursor: pointer; color: #555; display: flex; align-items: center; gap: 6px; }
+    .btn-quick:hover { border-color: var(--brown); color: var(--brown); }
+
+    /* TRANSCRIPT / LOADING / ERRORE */
+    .transcript-box { background: white; border: 1.5px solid var(--border); border-radius: 10px; padding: 14px 16px; margin: 0 0 16px; font-size: 15px; color: #333; line-height: 1.5; display: none; }
+    .transcript-box.visibile { display: block; }
+    .transcript-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .loading { text-align: center; padding: 16px; display: none; }
+    .loading.visibile { display: block; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 8px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .errore-box { background: #FFF3F3; border: 1px solid #FFCCCC; border-radius: 8px; padding: 12px 16px; color: var(--red); font-size: 14px; margin-bottom: 14px; display: none; }
+    .errore-box.visibile { display: block; }
+
+    /* LISTA PRODOTTI */
+    .lista-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .lista-header h2 { font-size: 18px; font-weight: 700; color: #1A1A1A; }
+    .btn-aggiungi { padding: 7px 14px; border-radius: 8px; border: 1.5px solid var(--brown); background: white; color: var(--brown); font-size: 13px; font-weight: 600; cursor: pointer; }
+
+    .prodotto-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 14px; }
+    .prodotto-card.non-trovato { border-color: #FFCCCC; background: #FFF8F8; }
+    .prodotto-info { flex: 1; }
+    .prodotto-brand { font-size: 16px; font-weight: 700; color: #1A1A1A; }
+    .prodotto-variante { font-size: 13px; color: #888; margin-top: 2px; }
+    .prodotto-corretto { font-size: 12px; color: var(--gold); margin-top: 3px; font-style: italic; }
+    .non-trovato-label { font-size: 12px; color: var(--red); margin-top: 3px; }
+
+    /* PREZZI */
+    .prodotto-prezzi { display: flex; gap: 16px; margin-top: 6px; flex-wrap: wrap; }
+    .prezzo-item { display: flex; flex-direction: column; }
+    .prezzo-label { font-size: 10px; color: #AAA; text-transform: uppercase; letter-spacing: 0.5px; }
+    .prezzo-val { font-size: 13px; font-weight: 600; color: var(--brown); }
+    .prezzo-val.verde { color: var(--green); }
+    .prezzo-val.peso { color: #666; }
+
+    /* TOTALE ORDINE */
+    .totale-box { background: var(--brown); border-radius: 10px; padding: 16px 20px; margin: 16px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+    .totale-item { text-align: center; }
+    .totale-label { font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .totale-val { font-size: 22px; font-weight: 800; color: white; }
+    .totale-val.gold { color: var(--gold); }
+
+    .qty-ctrl { display: flex; align-items: center; gap: 10px; }
+    .qty-btn { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--brown); background: white; font-size: 18px; font-weight: 700; color: var(--brown); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .qty-btn:hover { background: var(--brown); color: white; }
+    .qty-num { font-size: 20px; font-weight: 800; min-width: 28px; text-align: center; }
+    .rimuovi-btn { background: none; border: none; color: #CCC; font-size: 18px; cursor: pointer; }
+    .rimuovi-btn:hover { color: var(--red); }
+
+    /* MODIFICA */
+    .ordine-precedente { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .ordine-precedente h3 { font-size: 14px; font-weight: 700; color: var(--brown); margin-bottom: 10px; }
+    .ordine-prec-item { display: flex; justify-content: space-between; font-size: 13px; color: #555; padding: 4px 0; border-bottom: 1px solid #F5F0E8; }
+    .ordine-prec-item:last-child { border-bottom: none; }
+    .modifica-box { background: #EEF4FF; border: 1px solid #C3D9F5; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+    .modifica-box h3 { font-size: 14px; color: var(--blue); font-weight: 700; margin-bottom: 8px; }
+    .btn-modifica-mic { flex: 1; padding: 10px; background: var(--blue); border: none; border-radius: 8px; color: white; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-modifica-mic.ascoltando { background: var(--red); }
+
+    /* FOTO */
+    .foto-area { border: 2px dashed var(--border); border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; margin: 16px 0; transition: border-color 0.2s; }
+    .foto-area:hover { border-color: var(--gold); }
+    .foto-area p { font-size: 14px; color: #888; margin-top: 8px; }
+    .foto-preview { max-width: 100%; max-height: 200px; border-radius: 8px; margin: 8px auto; display: block; }
+
+    /* AZIONI */
+    .actions { margin-top: 20px; }
+    .istruzioni { background: #EAF4EE; border: 1px solid #C3E6CB; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #2E7D32; line-height: 1.6; margin-bottom: 12px; }
+    .btn-excel { width: 100%; padding: 16px; background: var(--green); border: none; border-radius: 10px; color: white; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 8px; }
+    .btn-excel:hover { background: #145C30; }
+    .btn-reset { width: 100%; padding: 12px; background: white; border: 1.5px solid var(--border); border-radius: 10px; color: #888; font-size: 14px; cursor: pointer; }
+
+    /* LOGOUT / USER INFO */
+    .header-user { display: flex; align-items: center; gap: 10px; }
+    .user-email { font-size: 13px; color: rgba(255,255,255,0.6); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn-logout { padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: rgba(255,255,255,0.7); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: rgba(255,255,255,0.1); color: white; }
+
+    /* BOTTONE EMAIL */
+    .btn-email { width: 100%; padding: 14px; background: var(--blue); border: none; border-radius: 10px; color: white; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-email:hover { background: #143A62; }
+
+    /* SIDEBAR TOGGLE MOBILE */
+    .btn-note-toggle { display: none; position: fixed; bottom: 24px; right: 20px; z-index: 50; width: 60px; height: 60px; border-radius: 50%; background: var(--brown); border: none; color: white; font-size: 26px; cursor: pointer; box-shadow: 0 4px 16px rgba(58,26,8,0.35); align-items: center; justify-content: center; }
+
+    /* ONBOARDING MODAL */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.nascosto { display: none; }
+    .modal-card { background: white; border-radius: 20px; padding: 40px 32px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
+    .modal-icona { font-size: 64px; line-height: 1; margin-bottom: 16px; }
+    .modal-titolo { font-size: 26px; font-weight: 800; color: var(--brown); margin-bottom: 12px; }
+    .modal-testo { font-size: 17px; color: #555; line-height: 1.7; margin-bottom: 28px; }
+    .modal-steps { text-align: left; background: #FDFBF8; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    .modal-step { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; font-size: 16px; color: #333; line-height: 1.5; }
+    .modal-step:last-child { margin-bottom: 0; }
+    .modal-step-num { width: 32px; height: 32px; border-radius: 50%; background: var(--brown); color: white; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .btn-modal-close { width: 100%; padding: 18px; background: var(--brown); color: white; border: none; border-radius: 12px; font-size: 19px; font-weight: 700; cursor: pointer; }
+    .btn-modal-close:hover { background: #5C2E10; }
+
+    /* PRODOTTO: font leggermente più grandi per 45+ */
+    .prodotto-brand { font-size: 17px; font-weight: 700; color: #1A1A1A; }
+    .prodotto-variante { font-size: 14px; color: #888; margin-top: 2px; }
+
+    /* RESPONSIVE */
+    @media (max-width: 768px) {
+      .main-layout { flex-direction: column; display: flex; }
+      .sidebar { order: 2; border-right: none; border-top: 1px solid var(--border); max-height: 400px; transition: max-height 0.3s ease, opacity 0.3s; }
+      .sidebar.nascosta { max-height: 0; overflow: hidden; opacity: 0; border: none; }
+      .main-layout { grid-template-columns: 1fr; }
+      .main-content { order: 1; padding: 16px; }
+      .mic-btn { width: 108px; height: 108px; }
+      .prodotto-prezzi { gap: 10px; }
+      .totale-box { flex-direction: column; text-align: center; }
+      .btn-note-toggle { display: flex; }
+      .user-email { display: none; }
+    }
+    @media (max-width: 480px) {
+      .header { padding: 12px 16px; }
+      .logo { font-size: 22px; }
+      .tabs { overflow-x: auto; }
+      .tab { white-space: nowrap; font-size: 13px; padding: 7px 14px; }
+      .mic-btn { width: 96px; height: 96px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Tabacc<span>AI</span></div>
+  <div class="header-user">
+    <span class="user-email" id="userEmail"></span>
+    <button class="btn-logout" onclick="logout()">Esci</button>
+  </div>
+</div>
+
+<div id="welcomeBanner" style="display:none;background:var(--brown);color:white;text-align:center;padding:10px 20px;font-size:16px;font-weight:600;letter-spacing:0.3px;"></div>
+
+<!-- ONBOARDING MODAL -->
+<div class="modal-overlay nascosto" id="onboardingModal">
+  <div class="modal-card">
+    <div class="modal-icona">🎙️</div>
+    <h2 class="modal-titolo">Come usare TabaccAI</h2>
+    <div class="modal-steps">
+      <div class="modal-step">
+        <div class="modal-step-num">1</div>
+        <div><strong>Premi il grande pulsante</strong> e parla: <em>"tre Marlboro Gold, due Chesterfield blu"</em>. Le quantità sono in stecche.</div>
+      </div>
+      <div class="modal-step">
+        <div class="modal-step-num">2</div>
+        <div><strong>Controlla la lista</strong> dei prodotti riconosciuti. Puoi modificare le quantità o rimuovere prodotti.</div>
+      </div>
+      <div class="modal-step">
+        <div class="modal-step-num">3</div>
+        <div><strong>Scarica l'Excel</strong> e caricalo su <strong>logistaitalia.it</strong> nella sezione Ordini → "Carica da file Excel".</div>
+      </div>
+    </div>
+    <button class="btn-modal-close" onclick="chiudiOnboarding()">Ho capito, inizia →</button>
+  </div>
+</div>
+
+<!-- TOGGLE NOTE SU MOBILE -->
+<button class="btn-note-toggle" id="btnNoteToggle" onclick="toggleSidebar()" title="Note e promemoria">📝</button>
+
+<div class="main-layout">
+
+  <!-- SIDEBAR NOTE -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>📝 Note & Promemoria</h2>
+      <p>Aggiungi durante la giornata</p>
+    </div>
+    <div class="reminder-banner" id="reminderBanner">
+      <strong>🔔 Promemoria ordine</strong>
+      <span id="reminderText"></span>
+    </div>
+    <div class="note-input-area">
+      <div class="note-input-row">
+        <input class="note-input" id="noteInput" type="text" placeholder="Es: Marlboro finiscono mercoledì...">
+        <button class="btn-icon btn-mic-nota" id="btnMicNota" onclick="toggleMicNota()" title="Parla nota">🎙️</button>
+        <button class="btn-icon btn-foto-nota" onclick="document.getElementById('fotoNota').click()" title="Foto prodotto">📷</button>
+        <input type="file" id="fotoNota" accept="image/*" style="display:none" onchange="gestisciFotoNota(event)">
+      </div>
+      <div class="scadenza-row">
+        <span style="font-size:12px;color:#888;align-self:center;">Scadenza:</span>
+        <button class="scadenza-chip" onclick="selezionaScadenza(this,'oggi')">Oggi</button>
+        <button class="scadenza-chip" onclick="selezionaScadenza(this,'domani')">Domani</button>
+        <button class="scadenza-chip" onclick="selezionaScadenza(this,'mercoledi')">Mercoledì</button>
+        <button class="scadenza-chip" onclick="selezionaScadenza(this,'settimana')">Sett. prossima</button>
+      </div>
+      <button class="btn-salva-nota" onclick="salvaNota()">+ Salva nota</button>
+    </div>
+    <div class="note-lista" id="noteLista">
+      <div class="note-vuote">Nessuna nota.<br>Aggiungi promemoria durante la giornata.</div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('nuovo')">Nuovo ordine</button>
+      <button class="tab" onclick="switchTab('modifica')">Modifica precedente</button>
+      <button class="tab" onclick="switchTab('foto')">Foto prodotto</button>
+    </div>
+
+    <!-- TAB NUOVO ORDINE -->
+    <div class="tab-panel active" id="tab-nuovo">
+      <div class="mic-section">
+        <button class="mic-btn" id="micBtn" onclick="toggleMic()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round">
+            <rect x="9" y="2" width="6" height="12" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0M12 19v3M8 22h8"/>
+          </svg>
+        </button>
+        <div class="mic-label" id="micLabel">Tocca per parlare</div>
+        <div class="mic-sublabel" id="micSublabel">Le quantità sono in stecche — es: "tre Marlboro Gold, due Chesterfield blu"</div>
+        <div class="quick-actions">
+          <button class="btn-quick" onclick="document.getElementById('fotoOrdine').click()">📷 Aggiungi foto</button>
+          <input type="file" id="fotoOrdine" accept="image/*" style="display:none" onchange="gestisciFotoOrdine(event)">
+        </div>
+      </div>
+
+      <div class="transcript-box" id="transcriptBox">
+        <div class="transcript-label">Ho sentito:</div>
+        <div id="transcriptText"></div>
+      </div>
+      <div class="errore-box" id="erroreBox"></div>
+      <div class="loading" id="loadingBox">
+        <div class="spinner"></div>
+        <p id="loadingText">Claude sta elaborando...</p>
+      </div>
+
+      <div id="listaSection" style="display:none">
+        <div class="lista-header">
+          <h2>Ordine (<span id="countProdotti">0</span> prodotti)</h2>
+          <button class="btn-aggiungi" onclick="aggiungiAltro()">+ Aggiungi</button>
+        </div>
+        <div id="listaProdotti"></div>
+        <div id="totaleBox" class="totale-box" style="display:none">
+          <div class="totale-item">
+            <div class="totale-label">Prodotti</div>
+            <div class="totale-val" id="totProdotti">0</div>
+          </div>
+          <div class="totale-item">
+            <div class="totale-label">Stecche totali</div>
+            <div class="totale-val" id="totStecche">0</div>
+          </div>
+          <div class="totale-item">
+            <div class="totale-label">Peso totale</div>
+            <div class="totale-val" id="totPeso">0 kg</div>
+          </div>
+          <div class="totale-item">
+            <div class="totale-label">Costo tabaccaio (90%)</div>
+            <div class="totale-val gold" id="totCosto">€ 0,00</div>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="istruzioni">✅ Scarica l'Excel e caricalo su <strong>logistaitalia.it</strong> → Ordini → Carica da file Excel. Il foglio "Upload Logista" contiene solo i codici AAMS.</div>
+          <button class="btn-excel" onclick="scaricaExcel()">📥 Scarica Excel per Logista</button>
+          <button class="btn-email" onclick="inviaPerEmail()">📧 Ricevi l'ordine per email</button>
+          <button class="btn-reset" onclick="resetTutto()">Nuovo ordine</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB MODIFICA -->
+    <div class="tab-panel" id="tab-modifica">
+      <div id="ordinePrecBox"><p style="color:#888;font-size:14px;padding:20px 0;">Caricamento ordine precedente...</p></div>
+      <div class="modifica-box" id="modificaBox" style="display:none">
+        <h3>🎙️ Modifica con la voce</h3>
+        <p style="font-size:13px;color:#555;margin-bottom:10px;">Di' cosa aggiungere o togliere: "aggiungi 2 stecche Winston blu, togli le Camel gialle"</p>
+        <button class="btn-modifica-mic" id="btnModificaMic" onclick="toggleMicModifica()">🎙️ Parla per modificare</button>
+        <div id="modificaRisultato" style="margin-top:10px;font-size:13px;color:var(--green);display:none"></div>
+      </div>
+      <div id="listaModificaSection" style="display:none">
+        <div class="lista-header"><h2>Ordine modificato (<span id="countModifica">0</span>)</h2></div>
+        <div id="listaProdottiModifica"></div>
+        <div id="totaleBoxModifica" class="totale-box" style="display:none;margin-top:12px">
+          <div class="totale-item"><div class="totale-label">Peso totale</div><div class="totale-val" id="totPesoMod">0 kg</div></div>
+          <div class="totale-item"><div class="totale-label">Costo tabaccaio (90%)</div><div class="totale-val gold" id="totCostoMod">€ 0,00</div></div>
+        </div>
+        <div class="actions" style="margin-top:16px">
+          <button class="btn-excel" onclick="scaricaExcelModifica()">📥 Scarica Excel per Logista</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB FOTO -->
+    <div class="tab-panel" id="tab-foto">
+      <div class="foto-area" onclick="document.getElementById('fotoTab').click()" id="fotoDropArea">
+        <div style="font-size:48px">📷</div>
+        <p>Tocca per scattare o scegli dalla libreria</p>
+        <p style="font-size:12px;margin-top:4px;">TabaccAI riconosce i prodotti dall'immagine</p>
+        <input type="file" id="fotoTab" accept="image/*" style="display:none" onchange="gestisciFotoTab(event)">
+      </div>
+      <img id="fotoPreview" class="foto-preview" style="display:none">
+      <div class="errore-box" id="erroreBoxFoto"></div>
+      <div class="loading" id="loadingFoto" style="display:none"><div class="spinner"></div><p>Claude analizza l'immagine...</p></div>
+      <div id="listaFotoSection" style="display:none">
+        <div class="lista-header">
+          <h2>Prodotti riconosciuti</h2>
+          <button class="btn-aggiungi" onclick="aggiungiDaFoto()">+ Aggiungi all'ordine</button>
+        </div>
+        <div id="listaProdottiFoto"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const BACKEND = 'https://tabaccai-backend-production.up.railway.app';
+  let SESSION_ID = null;
+  let authData = null;
+  let sidebarAperta = false;
+
+  // ── AUTH INIT ────────────────────────────────────────────────────────────
+  (async function initAuth() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+
+    if (token) {
+      // Verifica magic link token
+      try {
+        const res = await fetch(BACKEND + '/api/auth/verify', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+        if (data.successo) {
+          authData = { email: data.email, session_id: data.session_id };
+          localStorage.setItem('tabaccai_auth', JSON.stringify(authData));
+          // Rimuovi token dall'URL senza reload
+          const cleanUrl = window.location.pathname;
+          history.replaceState({}, '', cleanUrl);
+        } else {
+          window.location.replace('login.html');
+          return;
+        }
+      } catch {
+        window.location.replace('login.html');
+        return;
+      }
+    } else {
+      try { authData = JSON.parse(localStorage.getItem('tabaccai_auth') || 'null'); } catch {}
+      if (!authData) { window.location.replace('login.html'); return; }
+    }
+
+    SESSION_ID = authData.session_id;
+
+    // Mostra email in header
+    const emailEl = document.getElementById('userEmail');
+    if (emailEl && authData.email) emailEl.textContent = authData.email;
+
+    // Banner benvenuto
+    const chiaveRitorno = 'tabaccai_visited_' + authData.session_id;
+    const banner = document.getElementById('welcomeBanner');
+    if (localStorage.getItem(chiaveRitorno)) {
+      banner.textContent = 'Bentornato in TabaccAI! 👋';
+    } else {
+      banner.textContent = 'Benvenuto in TabaccAI! 🎉';
+      localStorage.setItem(chiaveRitorno, '1');
+      // Mostra onboarding al primo accesso
+      setTimeout(() => document.getElementById('onboardingModal').classList.remove('nascosto'), 600);
+    }
+    banner.style.display = 'block';
+    setTimeout(() => { banner.style.transition = 'opacity 1s'; banner.style.opacity = '0'; setTimeout(() => banner.style.display = 'none', 1000); }, 4000);
+
+    // Avvia app
+    caricaNote();
+    recuperaOrdineCorrente();
+    setInterval(caricaNote, 300000);
+  })();
+
+  function logout() {
+    if (confirm('Vuoi uscire da TabaccAI?')) {
+      localStorage.removeItem('tabaccai_auth');
+      window.location.replace('landing.html');
+    }
+  }
+
+  // ── ONBOARDING ───────────────────────────────────────────────────────────
+  function chiudiOnboarding() {
+    document.getElementById('onboardingModal').classList.add('nascosto');
+  }
+  // Chiudi cliccando fuori
+  document.getElementById('onboardingModal').addEventListener('click', function(e) {
+    if (e.target === this) chiudiOnboarding();
+  });
+
+  // ── SIDEBAR MOBILE TOGGLE ────────────────────────────────────────────────
+  function toggleSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const btn = document.getElementById('btnNoteToggle');
+    sidebarAperta = !sidebarAperta;
+    sidebar.classList.toggle('nascosta', !sidebarAperta);
+    btn.textContent = sidebarAperta ? '✕' : '📝';
+  }
+  // Su mobile, sidebar nascosta di default
+  if (window.innerWidth <= 768) {
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelector('.sidebar').classList.add('nascosta');
+    });
+  }
+
+  let prodottiOrdine = [];
+  let prodottiModifica = [];
+  let prodottiFoto = [];
+  let scadenzaSelezionata = null;
+  let recognition = null;
+  let ascoltando = false;
+  let modoAttuale = 'principale';
+
+  // ── TABS ──────────────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t,i) => { t.classList.toggle('active', ['nuovo','modifica','foto'][i] === tab); });
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-'+tab).classList.add('active');
+    if (tab === 'modifica') caricaOrdinePrecedente();
+  }
+
+  // ── MICROFONO ─────────────────────────────────────────────────────────────
+  function toggleMic() { modoAttuale='principale'; ascoltando?fermaAscolto():avviaAscolto(); }
+  function toggleMicNota() { modoAttuale='nota'; ascoltando?fermaAscolto():avviaAscolto(); }
+  function toggleMicModifica() { modoAttuale='modifica'; ascoltando?fermaAscolto():avviaAscolto(); }
+
+  function avviaAscolto() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) { mostraErrore('Usa Chrome per il riconoscimento vocale.'); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = 'it-IT'; recognition.continuous = false; recognition.interimResults = true;
+
+    recognition.onstart = () => {
+      ascoltando = true;
+      if (modoAttuale==='principale') { document.getElementById('micBtn').classList.add('ascoltando'); document.getElementById('micLabel').textContent='Sto ascoltando...'; nascondiErrore(); }
+      else if (modoAttuale==='nota') { document.getElementById('btnMicNota').classList.add('ascoltando'); }
+      else if (modoAttuale==='modifica') { document.getElementById('btnModificaMic').classList.add('ascoltando'); document.getElementById('btnModificaMic').textContent='🔴 Sto ascoltando...'; }
+    };
+
+    recognition.onresult = (e) => {
+      let testo = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) testo += e.results[i][0].transcript;
+      if (modoAttuale==='nota') document.getElementById('noteInput').value = testo;
+      else if (modoAttuale==='principale') { document.getElementById('transcriptBox').classList.add('visibile'); document.getElementById('transcriptText').textContent = testo; }
+    };
+
+    recognition.onend = () => {
+      ascoltando = false;
+      if (modoAttuale==='principale') {
+        document.getElementById('micBtn').classList.remove('ascoltando');
+        document.getElementById('micLabel').textContent='Tocca per parlare';
+        document.getElementById('micSublabel').textContent='Le quantità sono in stecche — es: "tre Marlboro Gold, due Chesterfield blu"';
+        const testo = document.getElementById('transcriptText').textContent;
+        if (testo && testo.trim()) inviaVoce(testo.trim());
+      } else if (modoAttuale==='nota') {
+        document.getElementById('btnMicNota').classList.remove('ascoltando');
+      } else if (modoAttuale==='modifica') {
+        document.getElementById('btnModificaMic').classList.remove('ascoltando');
+        document.getElementById('btnModificaMic').innerHTML='🎙️ Parla per modificare';
+        const testo = document.getElementById('transcriptText').textContent;
+        if (testo && testo.trim()) inviaModifica(testo.trim());
+      }
+    };
+
+    recognition.onerror = (e) => {
+      ascoltando = false;
+      document.getElementById('micBtn').classList.remove('ascoltando');
+      document.getElementById('btnMicNota').classList.remove('ascoltando');
+      if (document.getElementById('btnModificaMic')) document.getElementById('btnModificaMic').innerHTML='🎙️ Parla per modificare';
+      if (e.error==='not-allowed') mostraErrore('Abilita il microfono in Chrome.');
+      else if (e.error==='no-speech') mostraErrore('Non ho sentito nulla. Riprova.');
+    };
+    recognition.start();
+  }
+  function fermaAscolto() { if (recognition) recognition.stop(); }
+
+  // ── VOCE → PRODOTTI ───────────────────────────────────────────────────────
+  async function inviaVoce(testo) {
+    mostraLoading('Claude sta riconoscendo i prodotti...');
+    try {
+      const res = await fetch(`${BACKEND}/api/voice`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({testo, session_id:SESSION_ID}) });
+      const data = await res.json();
+      if (data.errore) throw new Error(data.errore);
+
+      const nonTrovati = data.prodotti.filter(p => p.codice_aams==='NON_TROVATO');
+      if (nonTrovati.length>0) mostraErrore(`Non ho riconosciuto: "${nonTrovati.map(p=>p.testo_originale).join(', ')}". Vai su "Foto prodotto" per mostrarmelo!`);
+
+      data.prodotti.filter(p=>p.codice_aams!=='NON_TROVATO').forEach(p => {
+        const esistente = prodottiOrdine.find(x=>x.codice_aams===p.codice_aams);
+        if (esistente) { esistente.qty += p.qty; aggiornaPrezziProdotto(esistente); }
+        else prodottiOrdine.push(p);
+      });
+      aggiornaLista();
+    } catch(err) { mostraErrore('Errore: '+err.message); }
+    finally { nascondiLoading(); }
+  }
+
+  function aggiornaPrezziProdotto(p) {
+    if (!p.prezzo_pacchetto) return;
+    const prezzoStecca = p.prezzo_pacchetto * (p.pezzi_per_stecca||10);
+    p.prezzo_stecca_tabaccaio = parseFloat((prezzoStecca*0.9).toFixed(2));
+    p.totale_tabaccaio = parseFloat((p.prezzo_stecca_tabaccaio*p.qty).toFixed(2));
+    p.peso_totale_kg = parseFloat(((p.peso_stecca_g||200)*p.qty/1000).toFixed(3));
+  }
+
+  // ── MODIFICA ORDINE ───────────────────────────────────────────────────────
+  async function inviaModifica(testo) {
+    if (prodottiModifica.length===0) return;
+    mostraLoading('Elaborazione modifiche...');
+    try {
+      const res = await fetch(`${BACKEND}/api/modifica-ordine`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({testo, ordine_corrente:prodottiModifica, session_id:SESSION_ID}) });
+      const data = await res.json();
+      if (data.errore) throw new Error(data.errore);
+      const {aggiunti, rimossi, modificati, messaggio} = data.modifiche;
+      if (aggiunti) aggiunti.forEach(p => { if (!prodottiModifica.find(x=>x.codice_aams===p.codice_aams)) prodottiModifica.push({...p,qty:p.qty||1}); });
+      if (rimossi) rimossi.forEach(p => { const idx=prodottiModifica.findIndex(x=>x.codice_aams===p.codice_aams); if(idx>-1) prodottiModifica.splice(idx,1); });
+      if (modificati) modificati.forEach(p => { const item=prodottiModifica.find(x=>x.codice_aams===p.codice_aams); if(item){item.qty=p.nuova_qty; aggiornaPrezziProdotto(item);} });
+      const el = document.getElementById('modificaRisultato');
+      el.textContent = '✅ '+(messaggio||'Ordine modificato'); el.style.display='block';
+      aggiornaListaModifica();
+    } catch(err) { mostraErrore('Errore modifica: '+err.message); }
+    finally { nascondiLoading(); }
+  }
+
+  // ── FOTO ──────────────────────────────────────────────────────────────────
+  async function elaboraFoto(file, destinazione) {
+    const base64 = await fileToBase64(file);
+    const mediaType = file.type||'image/jpeg';
+    if (destinazione==='tab') { document.getElementById('fotoPreview').src='data:'+mediaType+';base64,'+base64; document.getElementById('fotoPreview').style.display='block'; document.getElementById('loadingFoto').style.display='block'; }
+    else mostraLoading("Claude analizza l'immagine...");
+    try {
+      const res = await fetch(`${BACKEND}/api/immagine`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({immagine_base64:base64,media_type:mediaType,session_id:SESSION_ID}) });
+      const data = await res.json();
+      if (data.errore) throw new Error(data.errore);
+      if (destinazione==='ordine') {
+        data.prodotti.filter(p=>p.codice_aams!=='NON_TROVATO').forEach(p => {
+          const esistente=prodottiOrdine.find(x=>x.codice_aams===p.codice_aams);
+          if(esistente){esistente.qty+=(p.qty||1);aggiornaPrezziProdotto(esistente);}else prodottiOrdine.push({...p,qty:p.qty||1});
+        });
+        aggiornaLista(); switchTab('nuovo');
+      } else if (destinazione==='tab') { prodottiFoto=data.prodotti; aggiornaListaFoto(); }
+    } catch(err) {
+      if(destinazione==='tab'){document.getElementById('erroreBoxFoto').textContent='Errore: '+err.message;document.getElementById('erroreBoxFoto').classList.add('visibile');}
+      else mostraErrore('Errore foto: '+err.message);
+    } finally { if(destinazione==='tab') document.getElementById('loadingFoto').style.display='none'; else nascondiLoading(); }
+  }
+
+  function gestisciFotoOrdine(e) { if(e.target.files[0]) elaboraFoto(e.target.files[0],'ordine'); }
+  function gestisciFotoTab(e) { if(e.target.files[0]) elaboraFoto(e.target.files[0],'tab'); }
+
+  async function gestisciFotoNota(e) {
+    const file = e.target.files[0]; if(!file) return;
+    const base64 = await fileToBase64(file);
+    mostraLoading('Riconosco il prodotto...');
+    try {
+      const res = await fetch(`${BACKEND}/api/immagine`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({immagine_base64:base64,media_type:file.type,session_id:SESSION_ID}) });
+      const data = await res.json();
+      if (data.prodotti&&data.prodotti.length>0) document.getElementById('noteInput').value = data.prodotti.map(p=>p.brand).join(', ');
+    } catch(err){mostraErrore('Errore foto nota: '+err.message);}
+    finally{nascondiLoading();}
+  }
+
+  function aggiungiDaFoto() {
+    prodottiFoto.filter(p=>p.codice_aams!=='NON_TROVATO').forEach(p => {
+      const esistente=prodottiOrdine.find(x=>x.codice_aams===p.codice_aams);
+      if(esistente){esistente.qty+=(p.qty||1);aggiornaPrezziProdotto(esistente);}else prodottiOrdine.push({...p,qty:p.qty||1});
+    });
+    aggiornaLista(); switchTab('nuovo');
+  }
+
+  function fileToBase64(file) { return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);}); }
+
+  // ── NOTE ──────────────────────────────────────────────────────────────────
+  function selezionaScadenza(el, valore) {
+    document.querySelectorAll('.scadenza-chip').forEach(c=>c.classList.remove('selected'));
+    if (scadenzaSelezionata===valore) { scadenzaSelezionata=null; } else { el.classList.add('selected'); scadenzaSelezionata=valore; }
+  }
+
+  async function salvaNota() {
+    const input = document.getElementById('noteInput');
+    let testo = input.value.trim(); if(!testo) return;
+    if(scadenzaSelezionata) testo += ' — '+scadenzaSelezionata;
+    try {
+      const res = await fetch(`${BACKEND}/api/note`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({testo,session_id:SESSION_ID})});
+      const data = await res.json();
+      if(data.errore) throw new Error(data.errore);
+      input.value=''; scadenzaSelezionata=null;
+      document.querySelectorAll('.scadenza-chip').forEach(c=>c.classList.remove('selected'));
+      caricaNote();
+    } catch(err){alert('Errore: '+err.message);}
+  }
+
+  async function caricaNote() {
+    try {
+      const res = await fetch(`${BACKEND}/api/note/${SESSION_ID}`);
+      const data = await res.json(); if(data.errore) return;
+      mostraNoteUI(data.note||[]); controllaReminder(data.note||[]);
+    } catch(err){console.error(err);}
+  }
+
+  function mostraNoteUI(note) {
+    const container = document.getElementById('noteLista');
+    if(note.length===0){container.innerHTML='<div class="note-vuote">Nessuna nota.<br>Aggiungi promemoria durante la giornata.</div>';return;}
+    const oggi=new Date().toISOString().split('T')[0];
+    container.innerHTML = note.map(n=>{
+      let classe='', labelClasse='';
+      if(n.scadenza_data===oggi){classe='oggi';labelClasse='oggi-label';}
+      else if(n.scadenza_data&&n.scadenza_data<oggi){classe='in-scadenza';labelClasse='urgente';}
+      const prodNomi=n.prodotti&&n.prodotti.length>0?n.prodotti.map(p=>p.brand).join(', '):'';
+      return `<div class="nota-card ${classe}">
+        <div class="nota-testo">${n.testo}</div>
+        <div class="nota-meta">
+          ${n.scadenza_label?`<span class="nota-scadenza ${labelClasse}">${n.scadenza_label}</span>`:''}
+          ${prodNomi?`<span style="font-size:11px;color:#888;">${prodNomi}</span>`:''}
+          ${n.prodotti&&n.prodotti.length>0?`<button class="nota-aggiungi" onclick="aggiungiDaNota('${n.id}')">+ Aggiungi all'ordine</button>`:''}
+        </div>
+        <button class="nota-completa" onclick="completaNota('${n.id}')" title="Fatto">✓</button>
+      </div>`;
+    }).join('');
+  }
+
+  function controllaReminder(note) {
+    const oggi=new Date().toISOString().split('T')[0];
+    const urgenti=note.filter(n=>n.scadenza_data&&n.scadenza_data<=oggi);
+    const banner=document.getElementById('reminderBanner');
+    if(urgenti.length>0){document.getElementById('reminderText').textContent=`${urgenti.length} prodott${urgenti.length>1?'i':'o'} da ordinare oggi: ${urgenti.map(n=>n.testo).join(' · ')}`;banner.classList.add('visibile');}
+    else banner.classList.remove('visibile');
+  }
+
+  async function completaNota(id) { try{await fetch(`${BACKEND}/api/note/${id}`,{method:'PATCH'});caricaNote();}catch(err){console.error(err);} }
+
+  async function aggiungiDaNota(id) {
+    const res=await fetch(`${BACKEND}/api/note/${SESSION_ID}`);
+    const data=await res.json();
+    const nota=data.note.find(n=>n.id===id);
+    if(!nota||!nota.prodotti) return;
+    nota.prodotti.forEach(p=>{
+      const esistente=prodottiOrdine.find(x=>x.codice_aams===p.codice_aams);
+      if(esistente){esistente.qty+=(p.qty||1);aggiornaPrezziProdotto(esistente);}
+      else prodottiOrdine.push({brand:p.brand,variante:'',qty:p.qty||1,codice_aams:p.codice_aams});
+    });
+    aggiornaLista(); switchTab('nuovo');
+  }
+
+  // ── ORDINE PRECEDENTE ─────────────────────────────────────────────────────
+  async function caricaOrdinePrecedente() {
+    const box=document.getElementById('ordinePrecBox');
+    try {
+      const res=await fetch(`${BACKEND}/api/ordini/${SESSION_ID}/ultimo`);
+      const data=await res.json();
+      if(!data.ordine){box.innerHTML='<p style="color:#888;font-size:14px;padding:20px 0;">Nessun ordine precedente trovato.</p>';return;}
+      prodottiModifica=[...data.ordine.prodotti];
+      const dataOrdine=new Date(data.ordine.creato_at).toLocaleDateString('it-IT');
+      box.innerHTML=`<div class="ordine-precedente"><h3>📦 Ultimo ordine — ${dataOrdine}</h3>${data.ordine.prodotti.map(p=>`<div class="ordine-prec-item"><span>${p.brand} ${p.variante||''}</span><span>× ${p.qty} stecche</span></div>`).join('')}</div>`;
+      document.getElementById('modificaBox').style.display='block';
+      aggiornaListaModifica();
+    } catch(err){box.innerHTML='<p style="color:#888;font-size:14px;padding:20px 0;">Errore caricamento.</p>';}
+  }
+
+  // ── CALCOLA TOTALI ────────────────────────────────────────────────────────
+  function calcolaTotali(lista) {
+    let totCosto=0, totPeso=0, totStecche=0;
+    lista.forEach(p=>{
+      if(p.codice_aams==='NON_TROVATO') return;
+      totStecche += p.qty||0;
+      totCosto += p.totale_tabaccaio||0;
+      totPeso += p.peso_totale_kg||0;
+    });
+    return { totCosto:parseFloat(totCosto.toFixed(2)), totPeso:parseFloat(totPeso.toFixed(3)), totStecche };
+  }
+
+  // ── RENDER PRODOTTO ───────────────────────────────────────────────────────
+  function renderProdotto(p, index, tipo) {
+    const cambiaFn = tipo==='modifica' ? `cambiaQtyModifica` : tipo==='foto' ? `cambiaQtyFoto` : `cambiaQty`;
+    const rimuoviFn = tipo==='modifica' ? `rimuoviModifica` : tipo==='foto' ? null : `rimuoviProdotto`;
+
+    const prezziHtml = p.prezzo_pacchetto ? `
+      <div class="prodotto-prezzi">
+        <div class="prezzo-item"><div class="prezzo-label">Prezzo pacchetto</div><div class="prezzo-val">€ ${p.prezzo_pacchetto.toFixed(2)}</div></div>
+        <div class="prezzo-item"><div class="prezzo-label">Costo stecca (90%)</div><div class="prezzo-val verde">€ ${p.prezzo_stecca_tabaccaio ? p.prezzo_stecca_tabaccaio.toFixed(2) : '—'}</div></div>
+        <div class="prezzo-item"><div class="prezzo-label">Totale stecche</div><div class="prezzo-val verde">€ ${p.totale_tabaccaio ? p.totale_tabaccaio.toFixed(2) : '—'}</div></div>
+        <div class="prezzo-item"><div class="prezzo-label">Peso stecca</div><div class="prezzo-val peso">${p.peso_stecca_g||'—'} g</div></div>
+        <div class="prezzo-item"><div class="prezzo-label">Peso totale</div><div class="prezzo-val peso">${p.peso_totale_kg ? p.peso_totale_kg.toFixed(3) : '—'} kg</div></div>
+      </div>` : '';
+
+    return `<div class="prodotto-card ${p.codice_aams==='NON_TROVATO'?'non-trovato':''}">
+      <div class="prodotto-info">
+        <div class="prodotto-brand">${p.brand}</div>
+        <div class="prodotto-variante">${p.variante||''}</div>
+        ${p.corretto&&p.testo_originale?`<div class="prodotto-corretto">💬 "${p.testo_originale}" → corretto</div>`:''}
+        ${p.confidenza&&p.confidenza!=='alta'?`<div style="font-size:11px;color:#888;margin-top:2px;">Confidenza: ${p.confidenza}</div>`:''}
+        ${p.codice_aams==='NON_TROVATO'?'<div class="non-trovato-label">⚠️ Non trovato — vai su Foto prodotto</div>':''}
+        ${prezziHtml}
+      </div>
+      <div class="qty-ctrl">
+        <button class="qty-btn" onclick="${cambiaFn}(${index},-1)">−</button>
+        <span class="qty-num">${p.qty||1}</span>
+        <button class="qty-btn" onclick="${cambiaFn}(${index},1)">+</button>
+      </div>
+      ${rimuoviFn?`<button class="rimuovi-btn" onclick="${rimuoviFn}(${index})">×</button>`:''}
+    </div>`;
+  }
+
+  // ── AGGIORNA LISTE ────────────────────────────────────────────────────────
+  // Auto-salvataggio ordine in corso
+  async function salvaOrdineCorrente() {
+    if (!SESSION_ID) return;
+    if (prodottiOrdine.length === 0) return;
+    try {
+      const r = await fetch(BACKEND + '/api/ordine-corrente', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ session_id: SESSION_ID, prodotti: prodottiOrdine })
+      });
+      return await r.json();
+    } catch(err) { console.error('Errore auto-salvataggio:', err); }
+  }
+
+  // Recupera ordine in corso all'avvio
+  async function recuperaOrdineCorrente() {
+    try {
+      const res = await fetch(BACKEND + '/api/ordine-corrente/' + SESSION_ID);
+      const data = await res.json();
+      if (data.ordine && data.ordine.prodotti && data.ordine.prodotti.length > 0) {
+        prodottiOrdine = data.ordine.prodotti;
+        aggiornaLista();
+        // Mostra banner di recupero
+        const banner = document.getElementById('welcomeBanner');
+        if (banner) {
+          const msg = 'Ordine in corso recuperato — ' + prodottiOrdine.length + ' prodotti';
+          banner.textContent = msg;
+          banner.style.display = 'block';
+          banner.style.opacity = '1';
+          setTimeout(() => { banner.style.transition = 'opacity 1s'; banner.style.opacity = '0'; setTimeout(() => banner.style.display = 'none', 1000); }, 3000);
+        }
+      }
+    } catch(err) { console.error('Errore recupero ordine:', err); }
+  }
+
+  function aggiornaLista() {
+    const lista=document.getElementById('listaSection');
+    if(prodottiOrdine.length===0){lista.style.display='none';return;}
+    lista.style.display='block';
+    document.getElementById('countProdotti').textContent=prodottiOrdine.length;
+    document.getElementById('listaProdotti').innerHTML=prodottiOrdine.map((p,i)=>renderProdotto(p,i,'ordine')).join('');
+    salvaOrdineCorrente();
+    const t=calcolaTotali(prodottiOrdine);
+    const tb=document.getElementById('totaleBox');
+    tb.style.display='flex';
+    document.getElementById('totProdotti').textContent=prodottiOrdine.length;
+    document.getElementById('totStecche').textContent=t.totStecche;
+    document.getElementById('totPeso').textContent=t.totPeso.toFixed(2)+' kg';
+    document.getElementById('totCosto').textContent='€ '+t.totCosto.toFixed(2).replace('.',',');
+  }
+
+  function aggiornaListaModifica() {
+    const lista=document.getElementById('listaModificaSection');
+    if(prodottiModifica.length===0){lista.style.display='none';return;}
+    lista.style.display='block';
+    document.getElementById('countModifica').textContent=prodottiModifica.length;
+    document.getElementById('listaProdottiModifica').innerHTML=prodottiModifica.map((p,i)=>renderProdotto(p,i,'modifica')).join('');
+    const t=calcolaTotali(prodottiModifica);
+    const tb=document.getElementById('totaleBoxModifica');
+    tb.style.display='flex';
+    document.getElementById('totPesoMod').textContent=t.totPeso.toFixed(2)+' kg';
+    document.getElementById('totCostoMod').textContent='€ '+t.totCosto.toFixed(2).replace('.',',');
+  }
+
+  function aggiornaListaFoto() {
+    const lista=document.getElementById('listaFotoSection');
+    if(prodottiFoto.length===0){lista.style.display='none';return;}
+    lista.style.display='block';
+    document.getElementById('listaProdottiFoto').innerHTML=prodottiFoto.map((p,i)=>renderProdotto(p,i,'foto')).join('');
+  }
+
+  function cambiaQty(i,d) { prodottiOrdine[i].qty=Math.max(1,prodottiOrdine[i].qty+d); aggiornaPrezziProdotto(prodottiOrdine[i]); aggiornaLista(); }
+  function rimuoviProdotto(i) { prodottiOrdine.splice(i,1); aggiornaLista(); }
+  function cambiaQtyModifica(i,d) { prodottiModifica[i].qty=Math.max(1,prodottiModifica[i].qty+d); aggiornaPrezziProdotto(prodottiModifica[i]); aggiornaListaModifica(); }
+  function rimuoviModifica(i) { prodottiModifica.splice(i,1); aggiornaListaModifica(); }
+  function cambiaQtyFoto(i,d) { prodottiFoto[i].qty=Math.max(1,(prodottiFoto[i].qty||1)+d); aggiornaListaFoto(); }
+  function aggiungiAltro() { document.getElementById('transcriptText').textContent=''; avviaAscolto(); }
+
+  // ── EXCEL ─────────────────────────────────────────────────────────────────
+  async function scaricaExcel() {
+    if(prodottiOrdine.length===0) return;
+    await inviaExcel(prodottiOrdine);
+    try { await fetch(`${BACKEND}/api/ordini`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prodotti:prodottiOrdine,session_id:SESSION_ID})}); }
+    catch(err){console.error(err);}
+  }
+
+  async function scaricaExcelModifica() { if(prodottiModifica.length>0) await inviaExcel(prodottiModifica); }
+
+  async function inviaExcel(lista) {
+    try {
+      const res=await fetch(`${BACKEND}/api/excel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prodotti:lista,data_ordine:new Date().toISOString().split('T')[0],session_id:SESSION_ID})});
+      const blob=await res.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=`ordine_tabaccai_${new Date().toISOString().split('T')[0]}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch(err){mostraErrore('Errore download: '+err.message);}
+  }
+
+  // ── UTILS ─────────────────────────────────────────────────────────────────
+  function mostraLoading(t) { document.getElementById('loadingText').textContent=t||'Elaborazione...'; document.getElementById('loadingBox').classList.add('visibile'); }
+  function nascondiLoading() { document.getElementById('loadingBox').classList.remove('visibile'); }
+  function mostraErrore(msg) { const b=document.getElementById('erroreBox'); b.textContent=msg; b.classList.add('visibile'); }
+  function nascondiErrore() { document.getElementById('erroreBox').classList.remove('visibile'); }
+  function resetTutto() { prodottiOrdine=[]; document.getElementById('transcriptBox').classList.remove('visibile'); document.getElementById('transcriptText').textContent=''; nascondiErrore(); aggiornaLista(); }
+
+  document.getElementById('noteInput').addEventListener('keydown', e=>{ if(e.key==='Enter') salvaNota(); });
+
+  // ── INVIA PER EMAIL ───────────────────────────────────────────────────────
+  async function inviaPerEmail() {
+    if (prodottiOrdine.length === 0) return;
+    let email = authData?.email || '';
+    if (!email || !email.includes('@')) {
+      email = prompt('Inserisci la tua email per ricevere l\'ordine:');
+      if (!email || !email.includes('@')) return;
+    }
+    const btn = document.querySelector('.btn-email');
+    const testoOriginale = btn.innerHTML;
+    btn.innerHTML = '⏳ Invio in corso...';
+    btn.disabled = true;
+    try {
+      const res = await fetch(BACKEND + '/api/excel-email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ prodotti: prodottiOrdine, email, session_id: SESSION_ID, data_ordine: new Date().toISOString().split('T')[0] })
+      });
+      const data = await res.json();
+      if (data.errore) throw new Error(data.errore);
+      btn.innerHTML = '✅ Inviato a ' + email;
+      setTimeout(() => { btn.innerHTML = testoOriginale; btn.disabled = false; }, 4000);
+    } catch(err) {
+      mostraErrore('Errore invio email: ' + err.message);
+      btn.innerHTML = testoOriginale;
+      btn.disabled = false;
+    }
+  }
+</script>
+</body>
+</html>
